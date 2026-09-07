@@ -25,10 +25,35 @@ def print_test(name, result):
     print(f"{'='*60}")
     
     if "error" in result:
-        print(f"❌ BLOCKED: {result['error']['data']['reason']}")
+        error = result["error"]
+        error_data = error.get("data", {})
+        reasons = error_data.get("reasons", [])
+        
+        if reasons:
+            print(f"❌ BLOCKED: {'; '.join(reasons)}")
+        else:
+            print(f"❌ BLOCKED: {error.get('message', 'Unknown error')}")
+        
+        # Show policy details if available
+        policy_details = error_data.get("policy_details", {})
+        if policy_details:
+            print(f"   📋 Policy Details: {json.dumps(policy_details, indent=2)}")
+        
+        # Show analysis details if available
+        analysis_details = error_data.get("analysis_details", {})
+        if analysis_details and analysis_details.get("anomaly"):
+            print(f"   🚨 Anomaly: {analysis_details.get('reason')}")
     else:
-        print(f"✅ ALLOWED: {result.get('result', {}).get('policy_reason', 'No reason given')}")
-    print(f"📝 Response: {json.dumps(result, indent=2)}")
+        result_data = result.get("result", {})
+        print(f"✅ ALLOWED: {result_data.get('policy_reason', 'No reason given')}")
+        
+        # Show analysis if available
+        analysis = result_data.get("analysis", {})
+        if analysis and analysis.get("anomaly"):
+            print(f"   ⚠️ Analysis: {analysis.get('reason')}")
+    
+    # Show full response (shortened)
+    print(f"📝 Response: {json.dumps(result, indent=2)[:500]}...")
 
 if __name__ == "__main__":
     print("🔒 TESTING SECURITY POLICIES")
