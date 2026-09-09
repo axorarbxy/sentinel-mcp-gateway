@@ -102,18 +102,76 @@ class QRScanner:
                 'risk_factors': ['Unsupported image type']
             }
         
-        # Try to decode QR code
+        # Try multiple methods to decode QR code
+        decoded_content = None
+        
+        # Method 1: Direct decode with pyzbar
         try:
             decoded = decode(image)
             if decoded:
                 decoded_content = decoded[0].data.decode('utf-8')
-            else:
-                decoded_content = 'No QR code found in image'
+                print(f"✅ Method 1 (pyzbar): {decoded_content[:50]}")
         except Exception as e:
-            print(f"Decoding error: {e}")
-            decoded_content = 'Error decoding QR code'
+            print(f"Method 1 failed: {e}")
         
-        # Preprocess for ML
+        # Method 2: Convert to grayscale and try again
+        if not decoded_content and len(image.shape) == 3:
+            try:
+                gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+                decoded = decode(gray)
+                if decoded:
+                    decoded_content = decoded[0].data.decode('utf-8')
+                    print(f"✅ Method 2 (grayscale): {decoded_content[:50]}")
+            except Exception as e:
+                print(f"Method 2 failed: {e}")
+        
+        # Method 3: Try with PIL image directly
+        if not decoded_content:
+            try:
+                pil_image = Image.fromarray(image)
+                decoded = decode(pil_image)
+                if decoded:
+                    decoded_content = decoded[0].data.decode('utf-8')
+                    print(f"✅ Method 3 (PIL): {decoded_content[:50]}")
+            except Exception as e:
+                print(f"Method 3 failed: {e}")
+        
+        # Method 4: Apply preprocessing (enhance contrast, resize, denoise)
+        if not decoded_content:
+            try:
+                # Convert to grayscale
+                if len(image.shape) == 3:
+                    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+                else:
+                    gray = image
+                
+                # Enhance contrast
+                gray = cv2.equalizeHist(gray)
+                
+                # Resize if too small
+                h, w = gray.shape
+                if h < 100 or w < 100:
+                    scale = max(200 / h, 200 / w)
+                    new_w = int(w * scale)
+                    new_h = int(h * scale)
+                    gray = cv2.resize(gray, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+                
+                # Apply threshold
+                _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
+                
+                # Try to decode the preprocessed image
+                decoded = decode(thresh)
+                if decoded:
+                    decoded_content = decoded[0].data.decode('utf-8')
+                    print(f"✅ Method 4 (preprocessed): {decoded_content[:50]}")
+            except Exception as e:
+                print(f"Method 4 failed: {e}")
+        
+        if not decoded_content:
+            decoded_content = 'No QR code found in image'
+            print("❌ All decoding methods failed")
+        
+        # Preprocess for ML (only if QR code was found)
         try:
             processed = self.preprocessor.preprocess_image(image)
             structural_features = self.preprocessor.extract_structural_features(image)
@@ -129,25 +187,37 @@ class QRScanner:
                 'risk_factors': ['Preprocessing error']
             }
         
-        # ML Prediction
-        try:
-            result = self.model.predict(processed, structural_features)
-        except Exception as e:
-            print(f"Prediction error: {e}")
+        # ML Prediction (only if QR code was found and model is available)
+        if decoded_content != 'No QR code found in image' and self.model is not None:
+            try:
+                result = self.model.predict(processed, structural_features)
+            except Exception as e:
+                print(f"Prediction error: {e}")
+                result = {
+                    'is_malicious': False,
+                    'confidence': 0.5,
+                    'cnn_score': 0.5,
+                    'xgb_score': 0.5,
+                    'ensemble_score': 0.5,
+                    'risk_factors': ['Prediction error'],
+                    'threshold_used': 0.35
+                }
+        else:
+            # No QR code found or model not available
             result = {
                 'is_malicious': False,
-                'confidence': 0.5,
-                'cnn_score': 0.5,
-                'xgb_score': 0.5,
-                'ensemble_score': 0.5,
-                'risk_factors': ['Prediction error'],
+                'confidence': 0.0,
+                'cnn_score': 0.0,
+                'xgb_score': 0.0,
+                'ensemble_score': 0.0,
+                'risk_factors': ['No QR code detected'] if decoded_content == 'No QR code found in image' else ['Model unavailable'],
                 'threshold_used': 0.35
             }
         
         result['decoded_content'] = decoded_content
         
         # If decoded content is a URL, run URL analysis
-        if decoded_content and decoded_content.startswith(('http://', 'https://')):
+        if decoded_content and decoded_content != 'No QR code found in image' and decoded_content.startswith(('http://', 'https://')):
             url_analysis = self.scan_url(decoded_content)
             result['url_analysis'] = url_analysis
         

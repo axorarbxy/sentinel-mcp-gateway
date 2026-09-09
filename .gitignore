@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+env/
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# Environment variables
+.env
+.env.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Large model files (uncomment if you don't want to upload)
+# ml_models/qr_scanner/models/*.pth
+# ml_models/qr_scanner/models/*.pkl
+# ml_models/qr_scanner/data/real/
+
+# Node
+node_modules/
+frontend/node_modules/
+frontend/build/
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+temp_qr.png
+debug_qr.png
+test_qr.png

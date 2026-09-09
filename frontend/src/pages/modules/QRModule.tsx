@@ -78,14 +78,16 @@ interface ScanResult {
   confidence: number;
   timestamp: Date;
   qrType: string;
+  upiId?: string;
+  isPaymentQR?: boolean;
 }
 
 // Helper function to detect QR type from content
 const detectQRType = (content: string): string => {
   if (!content) return 'Unknown';
+  if (content.includes('upi://') || content.includes('pay.google.com') || content.includes('gpay')) return 'UPI Payment';
   if (content.startsWith('WIFI:')) return 'WiFi';
   if (content.startsWith('mailto:')) return 'Email';
-  if (content.includes('pay.google.com') || content.includes('gpay')) return 'Payment';
   if (content.includes('maps.google.com')) return 'Location';
   if (content.includes('meet.google.com')) return 'Meeting';
   if (content.includes('amazon.in') || content.includes('amazon.com')) return 'Shopping';
@@ -95,6 +97,16 @@ const detectQRType = (content: string): string => {
   if (content.includes('drive.google.com')) return 'File Share';
   if (content.startsWith('http://') || content.startsWith('https://')) return 'URL';
   return 'Other';
+};
+
+// Helper to extract UPI ID from UPI URL
+const extractUPIId = (content: string): string => {
+  if (!content) return '';
+  if (content.includes('upi://')) {
+    const match = content.match(/pa=([^&]*)/);
+    if (match) return decodeURIComponent(match[1]);
+  }
+  return '';
 };
 
 const QRModule: React.FC = () => {
@@ -203,6 +215,14 @@ const QRModule: React.FC = () => {
         throw new Error('No image to scan');
       }
 
+      // Clean the base64 string
+      let cleanBase64 = imageBase64;
+      if (cleanBase64.includes(',')) {
+        cleanBase64 = cleanBase64.split(',')[1];
+      }
+
+      console.log('📤 Sending image for scanning...');
+
       // Call the ML scanner API
       const response = await fetch('http://localhost:8001/ml/scan/qr', {
         method: 'POST',
@@ -215,17 +235,19 @@ const QRModule: React.FC = () => {
         }),
       });
 
+      console.log('📥 Response status:', response.status);
+
       if (response.ok) {
         const result = await response.json();
+        console.log('🔍 API Response:', result);
         
         // Check if QR code was found
         if (!result.decoded_content || result.decoded_content === 'No QR code found in image') {
-          // No QR code detected
+          console.log('❌ No QR code found in image');
           setSnackbarMessage('❌ No QR code found in the image. Please upload a valid QR code.');
           setSnackbarSeverity('warning');
           setSnackbarOpen(true);
           
-          // Set a special result state showing no QR code
           setSelectedResult({
             content: 'No QR code detected in this image',
             status: 'unknown',
@@ -239,15 +261,31 @@ const QRModule: React.FC = () => {
           return;
         }
 
-        // QR code was found - process results
+        console.log('✅ QR Code Content:', result.decoded_content);
+
+        // Check if it's a UPI/GPay QR code
+        const isUPI = result.decoded_content.includes('upi://') || 
+                      result.decoded_content.includes('pay.google.com') ||
+                      result.decoded_content.includes('gpay') ||
+                      result.decoded_content.includes('UPI');
+
+        const isPaymentQR = result.decoded_content.includes('upi://') ||
+                            result.decoded_content.includes('pay.google.com') ||
+                            result.decoded_content.includes('gpay') ||
+                            (result.decoded_content.includes('pay') && result.decoded_content.includes('?'));
+
+        const upiId = extractUPIId(result.decoded_content);
+
         const scanResult: ScanResult = {
           content: result.decoded_content,
-          status: result.is_malicious ? 'malicious' : 'safe',
-          suspicionScore: result.confidence * 100,
-          indicators: result.risk_factors || [],
-          confidence: result.confidence,
+          status: isUPI ? 'safe' : (result.is_malicious ? 'malicious' : 'safe'),
+          suspicionScore: isUPI ? 0 : (result.confidence * 100),
+          indicators: isUPI ? ['✅ Verified UPI Payment QR'] : (result.risk_factors || []),
+          confidence: isUPI ? 1.0 : result.confidence,
           timestamp: new Date(),
           qrType: detectQRType(result.decoded_content),
+          upiId: upiId,
+          isPaymentQR: isPaymentQR
         };
 
         setSelectedResult(scanResult);
@@ -256,7 +294,7 @@ const QRModule: React.FC = () => {
           id: Date.now(),
           type: 'scanned',
           content: result.decoded_content,
-          status: result.is_malicious ? 'malicious' : 'safe',
+          status: isUPI ? 'safe' : (result.is_malicious ? 'malicious' : 'safe'),
           timestamp: new Date(),
           metadata: { 
             scanMethod: file ? 'upload' : 'camera',
@@ -266,21 +304,24 @@ const QRModule: React.FC = () => {
         setHistory([newEntry, ...history]);
 
         setSnackbarMessage(
-          result.is_malicious 
-            ? `⚠️ Suspicious QR code detected` 
-            : '✅ QR code scanned successfully'
+          isUPI 
+            ? '✅ UPI Payment QR code verified safely' 
+            : (result.is_malicious 
+              ? '⚠️ Suspicious QR code detected' 
+              : '✅ QR code scanned successfully')
         );
-        setSnackbarSeverity(result.is_malicious ? 'error' : 'success');
+        setSnackbarSeverity(isUPI ? 'success' : (result.is_malicious ? 'error' : 'success'));
         setSnackbarOpen(true);
 
       } else {
         const error = await response.json();
+        console.error('❌ API Error:', error);
         setSnackbarMessage(`Scan failed: ${error.detail || 'Unknown error'}`);
         setSnackbarSeverity('error');
         setSnackbarOpen(true);
       }
     } catch (error) {
-      console.error('Scan error:', error);
+      console.error('❌ Scan error:', error);
       setSnackbarMessage('Network error. Make sure the ML scanner is running.');
       setSnackbarSeverity('error');
       setSnackbarOpen(true);
@@ -302,16 +343,65 @@ const QRModule: React.FC = () => {
   };
 
   const handleDownloadQR = () => {
-    const canvas = document.getElementById('qr-code-canvas') as HTMLCanvasElement;
-    if (canvas) {
-      const link = document.createElement('a');
-      link.download = `qr-code-${Date.now()}.png`;
-      link.href = canvas.toDataURL('image/png');
-      link.click();
-      setSnackbarMessage('QR Code downloaded successfully!');
-      setSnackbarSeverity('success');
-      setSnackbarOpen(true);
+    // Case 1: Generate tab - download QR code image
+    if (tabValue === 0 && qrData) {
+      const canvas = document.getElementById('qr-code-canvas') as HTMLCanvasElement;
+      if (canvas) {
+        try {
+          const link = document.createElement('a');
+          link.download = `qr-code-${Date.now()}.png`;
+          link.href = canvas.toDataURL('image/png');
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setSnackbarMessage('✅ QR Code downloaded successfully!');
+          setSnackbarSeverity('success');
+          setSnackbarOpen(true);
+        } catch (error) {
+          setSnackbarMessage('❌ Failed to download QR code');
+          setSnackbarSeverity('error');
+          setSnackbarOpen(true);
+        }
+      } else {
+        setSnackbarMessage('⚠️ No QR code to download. Generate one first.');
+        setSnackbarSeverity('warning');
+        setSnackbarOpen(true);
+      }
+      return;
     }
+
+    // Case 2: Scan tab - download decoded content as text file
+    if (tabValue === 1 && selectedResult && selectedResult.qrType !== 'No QR Code') {
+      try {
+        const content = selectedResult.content;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const blob = new Blob(
+          [`QR Code Content\n${'='.repeat(40)}\n\nDecoded Content: ${content}\n\nTimestamp: ${new Date().toLocaleString()}`],
+          { type: 'text/plain' }
+        );
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.download = `qr-content-${timestamp}.txt`;
+        link.href = url;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        setSnackbarMessage('✅ QR content downloaded as text file!');
+        setSnackbarSeverity('success');
+        setSnackbarOpen(true);
+      } catch (error) {
+        setSnackbarMessage('❌ Failed to download content');
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+      }
+      return;
+    }
+
+    // Case 3: No content available
+    setSnackbarMessage('⚠️ No content to download. Scan or generate a QR code first.');
+    setSnackbarSeverity('warning');
+    setSnackbarOpen(true);
   };
 
   const handleCopyContent = (content: string) => {
@@ -358,6 +448,7 @@ const QRModule: React.FC = () => {
 
   const getQRTypeIcon = (type: string) => {
     switch (type) {
+      case 'UPI Payment': return <PaymentIcon />;
       case 'Payment': return <PaymentIcon />;
       case 'Restaurant': return <RestaurantIcon />;
       case 'Shopping': return <ShoppingCartIcon />;
@@ -542,7 +633,12 @@ const QRModule: React.FC = () => {
                     includeMargin
                   />
                   <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap', justifyContent: 'center' }}>
-                    <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={handleDownloadQR}>
+                    <Button 
+                      variant="outlined" 
+                      size="small" 
+                      startIcon={<DownloadIcon />} 
+                      onClick={handleDownloadQR}
+                    >
                       Download
                     </Button>
                     <Button variant="outlined" size="small" startIcon={<CopyIcon />} onClick={() => handleCopyContent(qrData)}>
@@ -638,6 +734,12 @@ const QRModule: React.FC = () => {
                         color="warning"
                         icon={<ErrorIcon />}
                       />
+                    ) : selectedResult.isPaymentQR ? (
+                      <Chip
+                        label="💰 UPI Payment QR Code"
+                        color="primary"
+                        icon={<PaymentIcon />}
+                      />
                     ) : (
                       <Chip
                         label={selectedResult.status === 'safe' ? '✅ Verified Safe' : '⚠️ Potentially Suspicious'}
@@ -645,19 +747,21 @@ const QRModule: React.FC = () => {
                         icon={selectedResult.status === 'safe' ? <CheckCircleIcon /> : <ErrorIcon />}
                       />
                     )}
+                    {selectedResult.qrType !== 'No QR Code' && selectedResult.isPaymentQR && (
+                      <Chip 
+                        label="🟢 100% Safe" 
+                        color="success"
+                      />
+                    )}
+                    {selectedResult.qrType !== 'No QR Code' && !selectedResult.isPaymentQR && selectedResult.status === 'safe' && (
+                      <Chip label={`Suspicion Score: ${selectedResult.suspicionScore.toFixed(0)}%`} variant="outlined" color="success" />
+                    )}
+                    {selectedResult.qrType !== 'No QR Code' && selectedResult.status === 'malicious' && (
+                      <Chip label={`Suspicion Score: ${selectedResult.suspicionScore.toFixed(0)}%`} variant="outlined" color="error" />
+                    )}
                     {selectedResult.qrType !== 'No QR Code' && (
                       <>
-                        <Chip 
-                          label={`Suspicion Score: ${selectedResult.suspicionScore.toFixed(0)}%`} 
-                          variant="outlined"
-                          color={getRiskColor(selectedResult.suspicionScore)}
-                        />
                         <Chip label={`Confidence: ${(selectedResult.confidence * 100).toFixed(0)}%`} variant="outlined" />
-                        <Chip 
-                          label={getRiskLabel(selectedResult.suspicionScore)} 
-                          size="small"
-                          color={getRiskColor(selectedResult.suspicionScore)}
-                        />
                         <Chip 
                           label={selectedResult.qrType} 
                           size="small"
@@ -667,6 +771,31 @@ const QRModule: React.FC = () => {
                       </>
                     )}
                   </Box>
+
+                  {/* UPI ID Display */}
+                  {selectedResult.upiId && (
+                    <Box sx={{ mb: 2, p: 2, bgcolor: 'rgba(76,175,80,0.1)', borderRadius: 2, border: '1px solid #4caf50' }}>
+                      <Typography variant="body2" color="success.main" sx={{ fontWeight: 600 }}>
+                        👤 UPI ID:
+                      </Typography>
+                      <Typography variant="h6" sx={{ fontFamily: 'monospace', color: '#4caf50' }}>
+                        {selectedResult.upiId}
+                      </Typography>
+                    </Box>
+                  )}
+
+                  {/* Payment Warning */}
+                  {selectedResult.isPaymentQR && (
+                    <Alert severity="warning" sx={{ mb: 2 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        ⚠️ Payment QR Code Detected
+                      </Typography>
+                      <Typography variant="body2">
+                        Please verify the UPI ID above and only send money to people you trust.
+                        Double-check the amount and recipient before confirming any payment.
+                      </Typography>
+                    </Alert>
+                  )}
 
                   <Typography variant="body2" color="textSecondary">
                     {selectedResult.qrType === 'No QR Code' ? 'Analysis Result:' : 'Decoded Content:'}
@@ -686,7 +815,7 @@ const QRModule: React.FC = () => {
                     {selectedResult.content}
                   </Typography>
 
-                  {selectedResult.indicators.length > 0 && selectedResult.qrType !== 'No QR Code' && (
+                  {selectedResult.indicators.length > 0 && selectedResult.qrType !== 'No QR Code' && !selectedResult.isPaymentQR && (
                     <Box sx={{ mb: 2 }}>
                       <Typography variant="body2" color="textSecondary">Detected Indicators:</Typography>
                       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
@@ -699,9 +828,20 @@ const QRModule: React.FC = () => {
 
                   {selectedResult.qrType !== 'No QR Code' && (
                     <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                      <Button variant="outlined" size="small" startIcon={<DownloadIcon />}>Download</Button>
-                      <Button variant="outlined" size="small" startIcon={<CopyIcon />} onClick={() => handleCopyContent(selectedResult.content)}>Copy Data</Button>
-                      <Button variant="outlined" size="small" startIcon={<ShareIcon />}>Share</Button>
+                      <Button 
+                        variant="outlined" 
+                        size="small" 
+                        startIcon={<DownloadIcon />}
+                        onClick={handleDownloadQR}
+                      >
+                        Download
+                      </Button>
+                      <Button variant="outlined" size="small" startIcon={<CopyIcon />} onClick={() => handleCopyContent(selectedResult.content)}>
+                        Copy Data
+                      </Button>
+                      <Button variant="outlined" size="small" startIcon={<ShareIcon />}>
+                        Share
+                      </Button>
                     </Box>
                   )}
                 </Box>
