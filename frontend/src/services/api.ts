@@ -2,12 +2,27 @@
 import axios from 'axios';
 import { StatsResponse, HealthResponse, LogEntry, Alert, AgentStats } from '../types';
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = 'http://localhost:8001';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 10000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
 });
+
+// Add interceptor to include auth token
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('access_token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
 export const gatewayApi = {
   getHealth: async (): Promise<HealthResponse> => {
@@ -40,3 +55,5 @@ export const gatewayApi = {
     return response.data;
   },
 };
+
+export default api;

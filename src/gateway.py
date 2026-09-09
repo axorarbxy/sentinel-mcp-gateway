@@ -1,16 +1,25 @@
 """
 Sentinel-MCP Gateway - AI/ML Security Monitoring Framework
-Complete with Security Policies + Behavioral Anomaly Detection
+Complete with Security Policies + ML Anomaly Detection + CyberEye Modules + Authentication + ML QR Scanner
 """
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import json
 import logging
 from datetime import datetime
+
+# Import components
 from policies import PolicyEngine, PolicyAction
 from monitor import BehavioralMonitor, RequestAnalyzer
-from fastapi.middleware.cors import CORSMiddleware
+from modules.module_manager import ModuleManager
+
+# Import auth routes
+from auth_routes import router as auth_router
+
+# Import ML Scanner
+from ml_scanner import setup_ml_routes
 
 # Setup logging
 logging.basicConfig(
@@ -19,6 +28,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ============ CREATE APP FIRST ============
 app = FastAPI(title="Sentinel-MCP Gateway", version="2.0.0")
 
 # Enable CORS for frontend
@@ -30,16 +40,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize components
+# ============ INCLUDE AUTH ROUTES ============
+app.include_router(auth_router)
+
+# ============ SETUP ML ROUTES ============
+setup_ml_routes(app)
+
+# ============ INITIALIZE COMPONENTS ============
 policy_engine = PolicyEngine()
 behavioral_monitor = BehavioralMonitor(window_size=100, contamination=0.1)
 request_analyzer = RequestAnalyzer()
+
+# Initialize CyberEye modules
+cybereye = ModuleManager()
 
 # Track requests
 request_log = []
 blocked_requests = []
 anomaly_alerts = []
 
+# ============ MCP PROXY ENDPOINT ============
 @app.post("/mcp")
 async def mcp_proxy(request: Request):
     """
@@ -54,7 +74,7 @@ async def mcp_proxy(request: Request):
     
     method = data.get("method", "unknown")
     params = data.get("params", {})
-    agent_id = data.get("agent_id", "default-agent")  # Simulated agent ID
+    agent_id = data.get("agent_id", "default-agent")
     
     # 1. Policy evaluation (rule-based)
     policy_result = policy_engine.evaluate(method, params)
@@ -158,6 +178,70 @@ async def mcp_proxy(request: Request):
         }
     }
 
+# ============ CYBEREYE ENDPOINTS ============
+@app.post("/cybereye/analyze")
+async def cybereye_analyze(request: Request):
+    """
+    Analyze input using CyberEye modules
+    """
+    body = await request.body()
+    data = json.loads(body)
+    
+    input_type = data.get("type", "")
+    input_data = data.get("data", "")
+    
+    if not input_type or not input_data:
+        return {
+            "error": "Missing type or data",
+            "available_types": ["url", "file", "network", "user", "android", "password", "qr"]
+        }
+    
+    results = cybereye.analyze(input_type, input_data)
+    
+    return {
+        "input_type": input_type,
+        "results": results,
+        "risk_score": cybereye.get_risk_score()
+    }
+
+@app.get("/cybereye/events")
+async def cybereye_events(limit: int = 50):
+    """
+    Get all CyberEye security events
+    """
+    return {
+        "events": cybereye.get_all_events(limit),
+        "total": len(cybereye.events)
+    }
+
+@app.get("/cybereye/alerts")
+async def cybereye_alerts(limit: int = 20):
+    """
+    Get recent high/critical alerts
+    """
+    return {
+        "alerts": cybereye.get_recent_alerts(limit),
+        "total": len(cybereye.events)
+    }
+
+@app.get("/cybereye/stats")
+async def cybereye_stats():
+    """
+    Get CyberEye module statistics
+    """
+    return cybereye.get_module_stats()
+
+@app.get("/cybereye/risk")
+async def cybereye_risk():
+    """
+    Get overall risk score
+    """
+    return {
+        "risk_score": cybereye.get_risk_score(),
+        "total_events": len(cybereye.events)
+    }
+
+# ============ MONITORING ENDPOINTS ============
 @app.get("/health")
 async def health_check():
     return {
@@ -166,7 +250,8 @@ async def health_check():
         "blocked": len(blocked_requests),
         "anomalies": len(anomaly_alerts),
         "ml_models": len(behavioral_monitor.models),
-        "policies": "active"
+        "policies": "active",
+        "cybereye_modules": len(cybereye.modules)
     }
 
 @app.get("/logs")
@@ -216,17 +301,64 @@ async def get_stats():
 async def get_agent_stats(agent_id: str):
     return behavioral_monitor.get_agent_stats(agent_id)
 
+# ============ ROOT ============
+@app.get("/")
+async def root():
+    return {
+        "service": "Sentinel-MCP Gateway",
+        "version": "2.0.0",
+        "endpoints": {
+            "auth": {
+                "register": "/auth/register (POST)",
+                "login": "/auth/login (POST)",
+                "refresh": "/auth/refresh (POST)",
+                "logout": "/auth/logout (POST)",
+                "me": "/auth/me (GET)"
+            },
+            "mcp": "/mcp (POST)",
+            "health": "/health (GET)",
+            "stats": "/stats (GET)",
+            "logs": "/logs (GET)",
+            "logs/blocked": "/logs/blocked (GET)",
+            "logs/anomalies": "/logs/anomalies (GET)",
+            "agent/{id}": "/agent/{id} (GET)",
+            "cybereye": {
+                "analyze": "/cybereye/analyze (POST)",
+                "events": "/cybereye/events (GET)",
+                "alerts": "/cybereye/alerts (GET)",
+                "stats": "/cybereye/stats (GET)",
+                "risk": "/cybereye/risk (GET)"
+            },
+            "ml": {
+                "health": "/ml/health (GET)",
+                "scan_qr": "/ml/scan/qr (POST)",
+                "analyze_url": "/ml/analyze/url (POST)"
+            }
+        }
+    }
+
 if __name__ == "__main__":
     print("🚀 Starting Sentinel-MCP Gateway v2.0")
     print("🔒 Security Policies: ENABLED")
     print("🧠 ML Anomaly Detection: ENABLED")
-    print("📡 Listening on http://localhost:8000")
-    print("📊 Stats: http://localhost:8000/stats")
-    print("📋 Logs: http://localhost:8000/logs")
-    print("🚨 Anomalies: http://localhost:8000/logs/anomalies")
+    print("🛡️ CyberEye Modules: ENABLED")
+    print(f"   - {len(cybereye.modules)} modules loaded")
+    print("🔐 Authentication: ENABLED")
+    print("🤖 ML QR Scanner: ENABLED")
+    print("📡 Listening on http://localhost:8001")
+    print("📊 Stats: http://localhost:8001/stats")
+    print("📋 Logs: http://localhost:8001/logs")
+    print("🚨 Anomalies: http://localhost:8001/logs/anomalies")
+    print("🔄 CyberEye: http://localhost:8001/cybereye/stats")
+    print("🔐 Auth: http://localhost:8001/auth/register")
+    print("🤖 ML Health: http://localhost:8001/ml/health")
     print("")
-    print("💡 This implements SECUREVENT (arXiv 2606.01741) hybrid approach")
+    print("💡 This implements:")
+    print("   - SECUREVENT (arXiv 2606.01741) hybrid approach")
+    print("   - CyberEye 11-module security platform")
     print("   - Rule-based policies (first layer)")
     print("   - Behavioral analysis (second layer)")
     print("   - ML anomaly detection (third layer)")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    print("   - JWT Authentication (fourth layer)")
+    print("   - ML QR Scanner (fifth layer)")
+    uvicorn.run(app, host="0.0.0.0", port=8001)
