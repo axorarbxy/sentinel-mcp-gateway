@@ -1,3 +1,4 @@
+// App.tsx
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { ThemeProvider, createTheme, CssBaseline, AppBar, Toolbar, Typography, Tabs, Tab, Box } from '@mui/material';
@@ -6,6 +7,7 @@ import {
   Warning as WarningIcon,
   Person as PersonIcon,
   Security as SecurityIcon,
+  Flag as FlagIcon,
 } from '@mui/icons-material';
 import Dashboard from './components/Dashboard';
 import AlertsPage from './pages/Alerts';
@@ -47,6 +49,7 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [tabValue, setTabValue] = useState(0);
+  const [systemStatus, setSystemStatus] = useState<'active' | 'degraded' | 'critical'>('active');
 
   // Sync tab value with current route
   useEffect(() => {
@@ -56,6 +59,26 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     else if (path.includes('/modules')) setTabValue(3);
     else setTabValue(0);
   }, [location.pathname]);
+
+  // Poll system health
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        const response = await fetch('http://localhost:8001/health');
+        if (response.ok) {
+          setSystemStatus('active');
+        } else {
+          setSystemStatus('degraded');
+        }
+      } catch {
+        setSystemStatus('critical');
+      }
+    };
+
+    checkHealth();
+    const interval = setInterval(checkHealth, 15000); // Check every 15s
+    return () => clearInterval(interval);
+  }, []);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
@@ -77,9 +100,44 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     }
   };
 
+  const getStatusConfig = () => {
+    switch (systemStatus) {
+      case 'active':
+        return {
+          color: '#4caf50',
+          bg: 'rgba(76, 175, 80, 0.1)',
+          border: 'rgba(76, 175, 80, 0.3)',
+          label: 'PROTECTION ACTIVE',
+        };
+      case 'degraded':
+        return {
+          color: '#ff9800',
+          bg: 'rgba(255, 152, 0, 0.1)',
+          border: 'rgba(255, 152, 0, 0.3)',
+          label: 'DEGRADED',
+        };
+      case 'critical':
+        return {
+          color: '#f44336',
+          bg: 'rgba(244, 67, 54, 0.1)',
+          border: 'rgba(244, 67, 54, 0.3)',
+          label: 'OFFLINE',
+        };
+    }
+  };
+
+  const statusConfig = getStatusConfig();
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      <AppBar position="static" elevation={0} sx={{ bgcolor: 'background.paper' }}>
+      <AppBar
+        position="static"
+        elevation={0}
+        sx={{
+          bgcolor: 'background.paper',
+          borderBottom: '1px solid rgba(255,255,255,0.05)',
+        }}
+      >
         <Toolbar>
           <Typography
             variant="h6"
@@ -87,23 +145,70 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
               flexGrow: 0,
               mr: 4,
               cursor: 'pointer',
-              '&:hover': { color: 'primary.main' }
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+              '&:hover': { color: 'primary.main' },
             }}
             onClick={() => navigate('/dashboard', { replace: true })}
           >
             🛡️ Sentinel-MCP
           </Typography>
+
           <Tabs value={tabValue} onChange={handleTabChange} textColor="primary" indicatorColor="primary">
             <Tab icon={<DashboardIcon />} label="Dashboard" />
             <Tab icon={<WarningIcon />} label="Alerts" />
             <Tab icon={<PersonIcon />} label="Agents" />
             <Tab icon={<SecurityIcon />} label="Modules" />
           </Tabs>
-          <Typography variant="body2" color="textSecondary" sx={{ ml: 'auto' }}>
-            v2.0
-          </Typography>
+
+          {/* System Status Indicator */}
+          <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                px: 2,
+                py: 0.5,
+                borderRadius: 4,
+                bgcolor: statusConfig.bg,
+                border: `1px solid ${statusConfig.border}`,
+              }}
+            >
+              <Box
+                sx={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  bgcolor: statusConfig.color,
+                  boxShadow: `0 0 8px ${statusConfig.color}`,
+                  animation: 'pulse-dot 2s ease-in-out infinite',
+                  '@keyframes pulse-dot': {
+                    '0%, 100%': { opacity: 1 },
+                    '50%': { opacity: 0.4 },
+                  },
+                }}
+              />
+              <Typography
+                variant="caption"
+                sx={{
+                  fontWeight: 600,
+                  color: statusConfig.color,
+                  letterSpacing: 0.5,
+                }}
+              >
+                {statusConfig.label}
+              </Typography>
+            </Box>
+            <Typography variant="caption" color="textSecondary" sx={{ fontWeight: 600 }}>
+              v2.0
+            </Typography>
+          </Box>
         </Toolbar>
       </AppBar>
+
       <Box sx={{ flexGrow: 1, bgcolor: 'background.default' }}>
         {children}
       </Box>
