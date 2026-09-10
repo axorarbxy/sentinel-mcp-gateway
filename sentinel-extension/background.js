@@ -3,12 +3,12 @@
 // ============================================
 
 const API_URL = 'http://localhost:8001/ml/analyze/url';
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const RISK_THRESHOLD = 0.5;
 const BLOCK_RULE_ID_START = 10000;
 
 let urlCache = {};
-const blockedTabs = new Set(); // Prevent double-blocking per tab
+const blockedTabs = new Set();
 
 // Load cache on startup
 chrome.storage.local.get(['urlCache', 'protectionEnabled']).then(result => {
@@ -128,15 +128,12 @@ async function analyzeUrl(url) {
   }
 }
 
-// ============ BLOCK URL (Loop-Safe) ============
+// ============ BLOCK URL ============
 async function blockUrl(url, reason, riskScore, tabId) {
   try {
     const domain = new URL(url).hostname;
-
-    // Mark tab as blocked to prevent re-processing
     blockedTabs.add(tabId);
 
-    // Add dynamic rule (idempotent — same domain uses same rule ID)
     const ruleId = BLOCK_RULE_ID_START + hashString(domain) % 1000;
 
     await chrome.declarativeNetRequest.updateDynamicRules({
@@ -162,13 +159,11 @@ async function blockUrl(url, reason, riskScore, tabId) {
 
     console.log(`[Sentinel] 🚫 BLOCKED: ${domain}`);
 
-    // Only reload ONCE per tab
     if (tabId && !blockedTabs.has(tabId + '_reloaded')) {
       blockedTabs.add(tabId + '_reloaded');
       chrome.tabs.update(tabId, { url: url });
     }
 
-    // Notification (once)
     const notifId = `block_${domain}_${Date.now()}`;
     chrome.notifications.create(notifId, {
       type: 'basic',
@@ -178,7 +173,6 @@ async function blockUrl(url, reason, riskScore, tabId) {
       priority: 2,
     });
 
-    // Auto-clear the notification after 5 seconds
     setTimeout(() => {
       chrome.notifications.clear(notifId);
     }, 5000);
@@ -188,7 +182,6 @@ async function blockUrl(url, reason, riskScore, tabId) {
   }
 }
 
-// Simple string hash to generate stable rule IDs
 function hashString(str) {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -199,7 +192,7 @@ function hashString(str) {
   return Math.abs(hash);
 }
 
-// ============ CLEANUP BLOCKED TABS ============
+// ============ CLEANUP ============
 chrome.tabs.onRemoved.addListener((tabId) => {
   blockedTabs.delete(tabId);
   blockedTabs.delete(tabId + '_reloaded');
@@ -212,7 +205,6 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
   const url = details.url;
   const tabId = details.tabId;
 
-  // Skip internal URLs
   if (url.startsWith('chrome://') ||
       url.startsWith('chrome-extension://') ||
       url.startsWith('about:') ||
@@ -222,7 +214,6 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
     return;
   }
 
-  // Skip if we already blocked this tab
   if (blockedTabs.has(tabId)) {
     console.log(`[Sentinel] Tab ${tabId} already processed, skipping`);
     return;
@@ -265,6 +256,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'TOGGLE_PROTECTION') {
     chrome.storage.local.set({ protectionEnabled: message.enabled });
     sendResponse({ success: true });
+    return true;
+  }
+
+  // ============ UNBLOCK URL (called from blocked.html "Proceed Anyway") ============
+  if (message.type === 'UNBLOCK_URL') {
+    (async () => {
+      try {
+        const domain = new URL(message.url).hostname;
+
+        // Find and remove blocking rule for this domain
+        const rules = await chrome.declarativeNetRequest.getDynamicRules();
+        const toRemove = rules
+          .filter(r => r.condition?.urlFilter?.includes(domain))
+          .map(r => r.id);
+
+        if (toRemove.length > 0) {
+          await chrome.declarativeNetRequest.updateDynamicRules({
+            removeRuleIds: toRemove,
+          });
+        }
+
+        // Mark this URL as user-approved
+        urlCache[message.url] = {
+          is_suspicious: false,
+          risk_score: 0,
+          risk_factors: ['✅ User override'],
+          source: 'user_override',
+          timestamp: Date.now(),
+        };
+        persistCache();
+
+        console.log(`[Sentinel] ✅ Unblocked: ${domain}`);
+        sendResponse({ success: true });
+      } catch (error) {
+        console.error('[Sentinel] Unblock error:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
     return true;
   }
 });

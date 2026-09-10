@@ -8,7 +8,6 @@ const blockedUrl = params.get('url') || 'Unknown URL';
 const reasonParam = params.get('reason') || 'Suspicious URL pattern detected';
 let riskParam = parseFloat(params.get('risk') || '0');
 
-// Default to high risk if not provided
 if (!riskParam || riskParam === 0 || isNaN(riskParam)) {
   riskParam = 0.9;
 }
@@ -24,7 +23,7 @@ document.getElementById('blockedUrl').textContent = blockedUrl;
 const riskPercent = Math.min(100, Math.max(0, Math.round(riskParam * 100)));
 document.getElementById('riskScore').textContent = riskPercent + '%';
 
-// Animate the risk bar after a small delay
+// Animate the risk bar
 setTimeout(() => {
   document.getElementById('riskFill').style.width = riskPercent + '%';
 }, 150);
@@ -60,10 +59,10 @@ function goBack() {
 }
 
 // ============================================
-// Proceed anyway (advanced users)
+// Proceed anyway — sends message to service worker
 // ============================================
-async function proceedAnyway() {
-  const confirmed = confirm(
+function proceedAnyway() {
+  const confirmed = window.confirm(
     '⚠️ WARNING: This site was flagged as dangerous by Sentinel-MCP.\n\n' +
     'Proceeding can result in:\n' +
     '• Credential theft\n' +
@@ -74,7 +73,7 @@ async function proceedAnyway() {
 
   if (!confirmed) return;
 
-  const finalConfirm = confirm(
+  const finalConfirm = window.confirm(
     'This is your LAST warning.\n\n' +
     'Only proceed if you 100% trust this URL.\n\n' +
     'Click OK to proceed at your own risk.'
@@ -82,31 +81,23 @@ async function proceedAnyway() {
 
   if (!finalConfirm) return;
 
-  try {
-    const domain = new URL(blockedUrl).hostname;
-
-    const rules = await chrome.declarativeNetRequest.getDynamicRules();
-    const toRemove = rules
-      .filter(r => r.condition?.urlFilter?.includes(domain))
-      .map(r => r.id);
-
-    if (toRemove.length > 0) {
-      await chrome.declarativeNetRequest.updateDynamicRules({
-        removeRuleIds: toRemove
-      });
+  // Send message to background service worker to unblock
+  chrome.runtime.sendMessage(
+    {
+      type: 'UNBLOCK_URL',
+      url: blockedUrl,
+    },
+    (response) => {
+      if (response?.success) {
+        window.location.href = blockedUrl;
+      } else {
+        alert('Failed to unblock. Try disabling the extension manually.');
+      }
     }
-
-    window.location.href = blockedUrl;
-
-  } catch (error) {
-    console.error('Proceed failed:', error);
-    alert('Failed to proceed. Try disabling the extension manually.');
-  }
+  );
 }
 
-// ============================================
-// Attach event listeners to buttons
-// ============================================
+// Attach event listeners
 document.addEventListener('DOMContentLoaded', () => {
   const backBtn = document.getElementById('backBtn');
   const proceedBtn = document.getElementById('proceedBtn');

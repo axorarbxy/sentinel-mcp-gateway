@@ -98,6 +98,18 @@ KNOWN_BENIGN_DOMAINS = [
     'npmjs.com', 'pypi.org', 'docker.com', 'kubernetes.io',
     'redhat.com', 'ubuntu.com', 'debian.org', 'mozilla.org',
     'cloudflare.com', 'akamai.com', 'fastly.com',
+    # Dev & Docs (NEW)
+    'developer.chrome.com', 'developer.mozilla.org', 'developer.apple.com',
+    'developer.android.com', 'developers.google.com', 'developers.facebook.com',
+    'docs.microsoft.com', 'learn.microsoft.com', 'docs.github.com',
+    'console.cloud.google.com', 'console.aws.amazon.com', 'portal.azure.com',
+    'chrome.google.com', 'chromewebstore.google.com', 'addons.mozilla.org',
+    'chromium.org', 'web.dev', 'css-tricks.com', 'smashingmagazine.com',
+    'devdocs.io', 'readthedocs.io', 'godoc.org', 'pkg.go.dev',
+    'stackexchange.com', 'superuser.com', 'serverfault.com', 'askubuntu.com',
+    'microsoftonline.com', 'login.microsoftonline.com', 'login.live.com',
+    'accounts.google.com', 'myaccount.google.com', 'appleid.apple.com',
+    'web.dev', 'developers.cloudflare.com', 'docs.aws.amazon.com',
 ]
 
 
@@ -136,7 +148,7 @@ def extract_url_features(url):
                            '.online', '.work', '.click', '.link', '.review', '.country']
         features.append(1 if any(domain.endswith(tld) for tld in suspicious_tlds) else 0)
         
-        # 8. Phishing keywords — ONLY count if in DOMAIN or as full path segment
+        # Phishing keywords — only if in domain or path segment
         phishing_words = ['login', 'verify', 'secure', 'update', 'confirm', 'account',
                           'banking', 'password', 'credential', 'signin', 'auth', 'recovery',
                           'validation', 'unlock', 'restore', 'suspended']
@@ -248,8 +260,8 @@ def analyze_url(url: str, model_type: str = 'qr') -> dict:
         domain = parsed.netloc.lower()
         path = parsed.path.lower()
         
-        trusted_tlds = ['.com', '.org', '.net', '.edu', '.gov', '.io', '.co']
-        trusted_paths = ['/blog/', '/news/', '/article/', '/post/', '/docs/', '/wiki/']
+        trusted_tlds = ['.com', '.org', '.net', '.edu', '.gov', '.io', '.co', '.dev']
+        trusted_paths = ['/blog/', '/news/', '/article/', '/post/', '/docs/', '/wiki/', '/extensions/']
         
         is_trusted_tld = any(domain.endswith(tld) for tld in trusted_tlds)
         has_trusted_path = any(p in path for p in trusted_paths)
@@ -259,7 +271,7 @@ def analyze_url(url: str, model_type: str = 'qr') -> dict:
         has_hard_signal = any(sig in domain for sig in hard_signals)
         
         if is_trusted_tld and has_trusted_path and not has_hard_signal:
-            print(f"✅ Trusted TLD + blog/news path: {domain}")
+            print(f"✅ Trusted TLD + content path: {domain}")
             return {
                 'is_malicious': False,
                 'confidence': 0.15,

@@ -17,6 +17,11 @@
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [{
+    "matches": ["http://localhost:3000/*", "<all_urls>"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }],
   "action": {
     "default_popup": "popup/popup.html",
     "default_icon": {
@@ -33,7 +38,7 @@
     }]
   },
   "web_accessible_resources": [{
-    "resources": ["blocked.html"],
+    "resources": ["blocked.html", "blocked.js"],
     "matches": ["<all_urls>"]
   }],
   "icons": {
