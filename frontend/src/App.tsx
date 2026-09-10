@@ -7,7 +7,7 @@ import {
   Warning as WarningIcon,
   Person as PersonIcon,
   Security as SecurityIcon,
-  Flag as FlagIcon,
+  Storage as StorageIcon,
 } from '@mui/icons-material';
 import Dashboard from './components/Dashboard';
 import AlertsPage from './pages/Alerts';
@@ -16,6 +16,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Landing from './pages/Landing';
 import ModuleDashboard from './pages/ModuleDashboard';
+import MCPDashboard from './pages/MCPDashboard';
 
 // Module Pages
 import PhishingModule from './pages/modules/PhishingModule';
@@ -54,7 +55,8 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Sync tab value with current route
   useEffect(() => {
     const path = location.pathname;
-    if (path.includes('/alerts')) setTabValue(1);
+    if (path.includes('/mcp')) setTabValue(4);
+    else if (path.includes('/alerts')) setTabValue(1);
     else if (path.includes('/agents')) setTabValue(2);
     else if (path.includes('/modules')) setTabValue(3);
     else setTabValue(0);
@@ -76,7 +78,7 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     };
 
     checkHealth();
-    const interval = setInterval(checkHealth, 15000); // Check every 15s
+    const interval = setInterval(checkHealth, 15000);
     return () => clearInterval(interval);
   }, []);
 
@@ -94,6 +96,9 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         break;
       case 3:
         navigate('/modules', { replace: true });
+        break;
+      case 4:
+        navigate('/mcp', { replace: true });
         break;
       default:
         navigate('/dashboard', { replace: true });
@@ -161,6 +166,7 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             <Tab icon={<WarningIcon />} label="Alerts" />
             <Tab icon={<PersonIcon />} label="Agents" />
             <Tab icon={<SecurityIcon />} label="Modules" />
+            <Tab icon={<StorageIcon />} label="MCP" />
           </Tabs>
 
           {/* System Status Indicator */}
@@ -284,6 +290,16 @@ function App() {
               <ProtectedRoute>
                 <AppLayout>
                   <ModuleDashboard />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/mcp"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <MCPDashboard />
                 </AppLayout>
               </ProtectedRoute>
             }

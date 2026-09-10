@@ -1,6 +1,6 @@
 """
 Sentinel-MCP Gateway - AI/ML Security Monitoring Framework
-Complete with Security Policies + ML Anomaly Detection + CyberEye Modules + Authentication + ML QR Scanner
+Complete with Security Policies + ML Anomaly Detection + CyberEye Modules + Authentication + MCP Management
 """
 
 from fastapi import FastAPI, Request
@@ -8,7 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import json
 import logging
-from ml_reports import router as ml_reports_router
 from datetime import datetime
 
 # Import components
@@ -18,6 +17,9 @@ from modules.module_manager import ModuleManager
 
 # Import auth routes
 from auth_routes import router as auth_router
+
+# Import MCP management routes
+from mcp_routes import router as mcp_router
 
 # Import ML Scanner
 from ml_scanner import setup_ml_routes
@@ -36,6 +38,7 @@ app = FastAPI(title="Sentinel-MCP Gateway", version="2.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
+    allow_origin_regex=r"chrome-extension://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -44,10 +47,11 @@ app.add_middleware(
 # ============ INCLUDE AUTH ROUTES ============
 app.include_router(auth_router)
 
+# ============ INCLUDE MCP MANAGEMENT ROUTES ============
+app.include_router(mcp_router)
+
 # ============ SETUP ML ROUTES ============
 setup_ml_routes(app)
-# Setup ML reports routes
-app.include_router(ml_reports_router)
 
 # ============ INITIALIZE COMPONENTS ============
 policy_engine = PolicyEngine()
@@ -63,10 +67,11 @@ blocked_requests = []
 anomaly_alerts = []
 
 # ============ MCP PROXY ENDPOINT ============
-@app.post("/mcp")
+@app.post("/mcp/proxy")
 async def mcp_proxy(request: Request):
     """
     Main MCP proxy endpoint - evaluates requests with policies + ML anomaly detection
+    Note: Using /mcp/proxy to avoid conflict with /mcp/agents etc.
     """
     body = await request.body()
     
@@ -181,12 +186,10 @@ async def mcp_proxy(request: Request):
         }
     }
 
+
 # ============ CYBEREYE ENDPOINTS ============
 @app.post("/cybereye/analyze")
 async def cybereye_analyze(request: Request):
-    """
-    Analyze input using CyberEye modules
-    """
     body = await request.body()
     data = json.loads(body)
     
@@ -207,42 +210,35 @@ async def cybereye_analyze(request: Request):
         "risk_score": cybereye.get_risk_score()
     }
 
+
 @app.get("/cybereye/events")
 async def cybereye_events(limit: int = 50):
-    """
-    Get all CyberEye security events
-    """
     return {
         "events": cybereye.get_all_events(limit),
         "total": len(cybereye.events)
     }
 
+
 @app.get("/cybereye/alerts")
 async def cybereye_alerts(limit: int = 20):
-    """
-    Get recent high/critical alerts
-    """
     return {
         "alerts": cybereye.get_recent_alerts(limit),
         "total": len(cybereye.events)
     }
 
+
 @app.get("/cybereye/stats")
 async def cybereye_stats():
-    """
-    Get CyberEye module statistics
-    """
     return cybereye.get_module_stats()
+
 
 @app.get("/cybereye/risk")
 async def cybereye_risk():
-    """
-    Get overall risk score
-    """
     return {
         "risk_score": cybereye.get_risk_score(),
         "total_events": len(cybereye.events)
     }
+
 
 # ============ MONITORING ENDPOINTS ============
 @app.get("/health")
@@ -257,6 +253,7 @@ async def health_check():
         "cybereye_modules": len(cybereye.modules)
     }
 
+
 @app.get("/logs")
 async def get_logs(limit: int = 50):
     return {
@@ -266,6 +263,7 @@ async def get_logs(limit: int = 50):
         "logs": request_log[-limit:]
     }
 
+
 @app.get("/logs/blocked")
 async def get_blocked_logs(limit: int = 50):
     return {
@@ -273,12 +271,14 @@ async def get_blocked_logs(limit: int = 50):
         "logs": blocked_requests[-limit:]
     }
 
+
 @app.get("/logs/anomalies")
 async def get_anomalies(limit: int = 50):
     return {
         "total": len(anomaly_alerts),
         "alerts": anomaly_alerts[-limit:]
     }
+
 
 @app.get("/stats")
 async def get_stats():
@@ -300,9 +300,11 @@ async def get_stats():
         "monitor_stats": behavioral_monitor.get_stats()
     }
 
+
 @app.get("/agent/{agent_id}")
 async def get_agent_stats(agent_id: str):
     return behavioral_monitor.get_agent_stats(agent_id)
+
 
 # ============ ROOT ============
 @app.get("/")
@@ -318,27 +320,41 @@ async def root():
                 "logout": "/auth/logout (POST)",
                 "me": "/auth/me (GET)"
             },
-            "mcp": "/mcp (POST)",
-            "health": "/health (GET)",
-            "stats": "/stats (GET)",
-            "logs": "/logs (GET)",
-            "logs/blocked": "/logs/blocked (GET)",
-            "logs/anomalies": "/logs/anomalies (GET)",
-            "agent/{id}": "/agent/{id} (GET)",
+            "mcp": {
+                "proxy": "/mcp/proxy (POST)",
+                "overview": "/mcp/overview (GET)",
+                "agents": "/mcp/agents (GET/POST)",
+                "agent_detail": "/mcp/agents/{id} (GET/DELETE)",
+                "agent_suspend": "/mcp/agents/{id}/suspend (POST)",
+                "agent_resume": "/mcp/agents/{id}/resume (POST)",
+                "servers": "/mcp/servers (GET/POST)",
+                "server_health": "/mcp/servers/{id}/health (POST)",
+                "policies": "/mcp/policies (GET/POST)",
+                "policy_toggle": "/mcp/policies/{id}/toggle (PUT)"
+            },
+            "ml": {
+                "health": "/ml/health (GET)",
+                "scan_qr": "/ml/scan/qr (POST)",
+                "analyze_url": "/ml/analyze/url (POST)"
+            },
+            "monitoring": {
+                "health": "/health (GET)",
+                "stats": "/stats (GET)",
+                "logs": "/logs (GET)",
+                "logs_blocked": "/logs/blocked (GET)",
+                "logs_anomalies": "/logs/anomalies (GET)",
+                "agent": "/agent/{id} (GET)"
+            },
             "cybereye": {
                 "analyze": "/cybereye/analyze (POST)",
                 "events": "/cybereye/events (GET)",
                 "alerts": "/cybereye/alerts (GET)",
                 "stats": "/cybereye/stats (GET)",
                 "risk": "/cybereye/risk (GET)"
-            },
-            "ml": {
-                "health": "/ml/health (GET)",
-                "scan_qr": "/ml/scan/qr (POST)",
-                "analyze_url": "/ml/analyze/url (POST)"
             }
         }
     }
+
 
 if __name__ == "__main__":
     print("🚀 Starting Sentinel-MCP Gateway v2.0")
@@ -347,21 +363,24 @@ if __name__ == "__main__":
     print("🛡️ CyberEye Modules: ENABLED")
     print(f"   - {len(cybereye.modules)} modules loaded")
     print("🔐 Authentication: ENABLED")
+    print("🎛️ MCP Management: ENABLED")
     print("🤖 ML QR Scanner: ENABLED")
     print("📡 Listening on http://localhost:8001")
-    print("📊 Stats: http://localhost:8001/stats")
-    print("📋 Logs: http://localhost:8001/logs")
-    print("🚨 Anomalies: http://localhost:8001/logs/anomalies")
-    print("🔄 CyberEye: http://localhost:8001/cybereye/stats")
-    print("🔐 Auth: http://localhost:8001/auth/register")
-    print("🤖 ML Health: http://localhost:8001/ml/health")
     print("")
-    print("💡 This implements:")
+    print("📊 Dashboards:")
+    print("   - Main: http://localhost:8001/")
+    print("   - MCP Overview: http://localhost:8001/mcp/overview")
+    print("   - MCP Agents: http://localhost:8001/mcp/agents")
+    print("   - MCP Policies: http://localhost:8001/mcp/policies")
+    print("   - MCP Servers: http://localhost:8001/mcp/servers")
+    print("   - ML Health: http://localhost:8001/ml/health")
+    print("")
+    print("💡 Implements:")
     print("   - SECUREVENT (arXiv 2606.01741) hybrid approach")
     print("   - CyberEye 11-module security platform")
-    print("   - Rule-based policies (first layer)")
-    print("   - Behavioral analysis (second layer)")
-    print("   - ML anomaly detection (third layer)")
-    print("   - JWT Authentication (fourth layer)")
-    print("   - ML QR Scanner (fifth layer)")
+    print("   - Rule-based policies (layer 1)")
+    print("   - Behavioral analysis (layer 2)")
+    print("   - ML anomaly detection (layer 3)")
+    print("   - JWT Authentication (layer 4)")
+    print("   - MCP Management (layer 5)")
     uvicorn.run(app, host="0.0.0.0", port=8001)

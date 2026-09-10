@@ -9,13 +9,14 @@ from datetime import datetime
 import os
 
 # Database setup - Using SQLite for development
-# Change to PostgreSQL later: postgresql://user:password@localhost/dbname
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./sentinel_mcp.db")
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+
+# ============ EXISTING TABLES ============
 class User(Base):
     __tablename__ = "users"
     
@@ -33,6 +34,7 @@ class User(Base):
     audit_logs = relationship("AuditLog", back_populates="user")
     api_keys = relationship("APIKey", back_populates="user")
 
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     
@@ -44,8 +46,8 @@ class AuditLog(Base):
     user_agent = Column(String(255))
     timestamp = Column(DateTime, default=datetime.utcnow)
     
-    # Relationships
     user = relationship("User", back_populates="audit_logs")
+
 
 class APIKey(Base):
     __tablename__ = "api_keys"
@@ -59,19 +61,8 @@ class APIKey(Base):
     expires_at = Column(DateTime)
     last_used = Column(DateTime)
     
-    # Relationships
     user = relationship("User", back_populates="api_keys")
 
-# Create tables
-Base.metadata.create_all(bind=engine)
-
-# Dependency to get DB session
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 class ThreatReport(Base):
     """User-submitted threat reports"""
@@ -79,28 +70,28 @@ class ThreatReport(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     url = Column(String(2000), nullable=False, index=True)
-    verdict = Column(String(50))  # safe, low, medium, high, critical, phishing
+    verdict = Column(String(50))
     risk_score = Column(Float)
     confidence = Column(Float)
-    risk_factors = Column(Text)  # JSON string
+    risk_factors = Column(Text)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     reporter_note = Column(Text, nullable=True)
-    status = Column(String(50), default="pending")  # pending, verified, rejected
+    status = Column(String(50), default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
     
     user = relationship("User")
 
 
 class DetectionFeedback(Base):
-    """User feedback on detections for model improvement"""
+    """User feedback on detections"""
     __tablename__ = "detection_feedback"
     
     id = Column(Integer, primary_key=True, index=True)
     url = Column(String(2000), nullable=False, index=True)
-    predicted_verdict = Column(String(50))  # what our model said
+    predicted_verdict = Column(String(50))
     predicted_risk_score = Column(Float)
-    feedback_type = Column(String(20))  # correct, incorrect
-    actual_verdict = Column(String(50))  # user's correction (if incorrect)
+    feedback_type = Column(String(20))
+    actual_verdict = Column(String(50))
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     note = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -117,6 +108,74 @@ class ScanHistory(Base):
     verdict = Column(String(50))
     risk_score = Column(Float)
     confidence = Column(Float)
-    source = Column(String(50))  # phishing_module, qr_module, api
+    source = Column(String(50))
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ============ NEW: MCP MANAGEMENT TABLES ============
+class MCPAgent(Base):
+    """Registered AI agents that use MCP"""
+    __tablename__ = "mcp_agents"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    description = Column(String(500), nullable=True)
+    api_key = Column(String(255), unique=True, index=True, nullable=False)
+    policies = Column(Text, default="[]")
+    is_active = Column(Boolean, default=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    total_requests = Column(Integer, default=0)
+    blocked_requests = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_seen = Column(DateTime, nullable=True)
+    
+    user = relationship("User")
+
+
+class MCPServer(Base):
+    """Connected MCP servers that the gateway proxies to"""
+    __tablename__ = "mcp_servers"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    description = Column(String(500), nullable=True)
+    url = Column(String(500), nullable=False)
+    server_type = Column(String(50), default="custom")
+    auth_token = Column(String(500), nullable=True)
+    is_active = Column(Boolean, default=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    last_health_check = Column(DateTime, nullable=True)
+    health_status = Column(String(20), default="unknown")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User")
+
+
+class MCPPolicy(Base):
+    """Security policies that agents must comply with"""
+    __tablename__ = "mcp_policies"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    description = Column(String(500), nullable=True)
+    rule_type = Column(String(50), nullable=False)
+    config = Column(Text, default="{}")
+    severity = Column(String(20), default="medium")
+    is_enabled = Column(Boolean, default=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User")
+
+
+# Create tables
+Base.metadata.create_all(bind=engine)
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
