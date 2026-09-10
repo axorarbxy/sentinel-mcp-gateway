@@ -72,3 +72,51 @@ def get_db():
         yield db
     finally:
         db.close()
+
+class ThreatReport(Base):
+    """User-submitted threat reports"""
+    __tablename__ = "threat_reports"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    url = Column(String(2000), nullable=False, index=True)
+    verdict = Column(String(50))  # safe, low, medium, high, critical, phishing
+    risk_score = Column(Float)
+    confidence = Column(Float)
+    risk_factors = Column(Text)  # JSON string
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reporter_note = Column(Text, nullable=True)
+    status = Column(String(50), default="pending")  # pending, verified, rejected
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User")
+
+
+class DetectionFeedback(Base):
+    """User feedback on detections for model improvement"""
+    __tablename__ = "detection_feedback"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    url = Column(String(2000), nullable=False, index=True)
+    predicted_verdict = Column(String(50))  # what our model said
+    predicted_risk_score = Column(Float)
+    feedback_type = Column(String(20))  # correct, incorrect
+    actual_verdict = Column(String(50))  # user's correction (if incorrect)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User")
+
+
+class ScanHistory(Base):
+    """Track all scans for analytics"""
+    __tablename__ = "scan_history"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    url = Column(String(2000), nullable=False, index=True)
+    verdict = Column(String(50))
+    risk_score = Column(Float)
+    confidence = Column(Float)
+    source = Column(String(50))  # phishing_module, qr_module, api
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

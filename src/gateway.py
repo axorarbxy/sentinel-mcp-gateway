@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import json
 import logging
+from ml_reports import router as ml_reports_router
 from datetime import datetime
 
 # Import components
@@ -45,6 +46,8 @@ app.include_router(auth_router)
 
 # ============ SETUP ML ROUTES ============
 setup_ml_routes(app)
+# Setup ML reports routes
+app.include_router(ml_reports_router)
 
 # ============ INITIALIZE COMPONENTS ============
 policy_engine = PolicyEngine()

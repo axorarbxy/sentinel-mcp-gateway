@@ -46,3 +46,14 @@ logs/
 temp_qr.png
 debug_qr.png
 test_qr.png
+
+# Large datasets (keep local only)
+ml_models/phishing_detector/data/raw/
+ml_models/phishing_detector/data/processed/
+
+# Large model files (> 50MB)
+ml_models/phishing_detector/models/phishing_rf.pkl
+ml_models/phishing_detector/models/phishing_xgb.pkl
+
+# Keep scaler (small)
+!ml_models/phishing_detector/models/phishing_scaler.pkl
