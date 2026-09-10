@@ -226,9 +226,20 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
 
   const result = await analyzeUrl(url);
 
-  if (result.is_suspicious && result.risk_score > RISK_THRESHOLD) {
-    const reason = (result.risk_factors || []).join('; ') || 'Suspicious URL pattern detected';
+  // ============================================
+  // CRITICAL FIX: Only block if we have valid risk factors
+  // ============================================
+  const hasValidReason = result.risk_factors && 
+                         result.risk_factors.length > 0 && 
+                         !result.risk_factors[0].toLowerCase().includes('no obvious') &&
+                         !result.risk_factors[0].toLowerCase().includes('no specific threats') &&
+                         !result.risk_factors[0].toLowerCase().includes('model flagged but');
+  
+  if (result.is_suspicious && result.risk_score > RISK_THRESHOLD && hasValidReason) {
+    const reason = result.risk_factors.join('; ');
     await blockUrl(url, reason, result.risk_score, tabId);
+  } else if (result.is_suspicious) {
+    console.log(`[Sentinel] Skipping block — no specific threats: ${url}`);
   }
 });
 
@@ -259,13 +270,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // ============ UNBLOCK URL (called from blocked.html "Proceed Anyway") ============
+  // ============ UNBLOCK URL ============
   if (message.type === 'UNBLOCK_URL') {
     (async () => {
       try {
         const domain = new URL(message.url).hostname;
 
-        // Find and remove blocking rule for this domain
         const rules = await chrome.declarativeNetRequest.getDynamicRules();
         const toRemove = rules
           .filter(r => r.condition?.urlFilter?.includes(domain))
@@ -277,7 +287,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           });
         }
 
-        // Mark this URL as user-approved
         urlCache[message.url] = {
           is_suspicious: false,
           risk_score: 0,

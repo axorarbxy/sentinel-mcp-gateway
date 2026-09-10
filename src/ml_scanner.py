@@ -18,7 +18,6 @@ from PIL import Image
 from urllib.parse import urlparse
 from collections import Counter
 
-# Paths
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 model_dir = os.path.join(project_root, 'ml_models', 'qr_scanner', 'models')
@@ -27,7 +26,6 @@ phishing_model_dir = os.path.join(project_root, 'ml_models', 'phishing_detector'
 print(f"📁 QR models: {model_dir}")
 print(f"📁 Phishing models: {phishing_model_dir}")
 
-# Load QR models
 try:
     xgb_model = joblib.load(os.path.join(model_dir, 'url_xgb_model.pkl'))
     rf_model = joblib.load(os.path.join(model_dir, 'url_rf_model.pkl'))
@@ -39,7 +37,6 @@ except Exception as e:
     MODELS_LOADED = False
     xgb_model = rf_model = scaler = None
 
-# Load Phishing models
 try:
     phishing_xgb = joblib.load(os.path.join(phishing_model_dir, 'phishing_xgb.pkl'))
     phishing_rf = joblib.load(os.path.join(phishing_model_dir, 'phishing_rf.pkl'))
@@ -52,7 +49,6 @@ except Exception as e:
     phishing_xgb = phishing_rf = phishing_scaler = None
 
 
-# ============ KNOWN BENIGN DOMAINS ============
 KNOWN_BENIGN_DOMAINS = [
     # Tech
     'google.com', 'github.com', 'stackoverflow.com', 'wikipedia.org',
@@ -81,7 +77,7 @@ KNOWN_BENIGN_DOMAINS = [
     'dropbox.com', 'box.com', 'mega.nz', 'mediafire.com',
     'booking.com', 'airbnb.com', 'uber.com', 'ola.cab',
     'zomato.com', 'swiggy.com',
-    # Security / News / Education
+    # Security / News
     'netcraft.com', 'kaspersky.com', 'mcafee.com', 'norton.com', 'avast.com',
     'malwarebytes.com', 'sophos.com', 'trendmicro.com', 'fortinet.com',
     'crowdstrike.com', 'paloaltonetworks.com', 'checkpoint.com', 'cisco.com',
@@ -98,7 +94,7 @@ KNOWN_BENIGN_DOMAINS = [
     'npmjs.com', 'pypi.org', 'docker.com', 'kubernetes.io',
     'redhat.com', 'ubuntu.com', 'debian.org', 'mozilla.org',
     'cloudflare.com', 'akamai.com', 'fastly.com',
-    # Dev & Docs (NEW)
+    # Dev & Docs
     'developer.chrome.com', 'developer.mozilla.org', 'developer.apple.com',
     'developer.android.com', 'developers.google.com', 'developers.facebook.com',
     'docs.microsoft.com', 'learn.microsoft.com', 'docs.github.com',
@@ -109,12 +105,43 @@ KNOWN_BENIGN_DOMAINS = [
     'stackexchange.com', 'superuser.com', 'serverfault.com', 'askubuntu.com',
     'microsoftonline.com', 'login.microsoftonline.com', 'login.live.com',
     'accounts.google.com', 'myaccount.google.com', 'appleid.apple.com',
-    'web.dev', 'developers.cloudflare.com', 'docs.aws.amazon.com',
+    'developers.cloudflare.com', 'docs.aws.amazon.com',
+    # AI Platforms
+    'chatgpt.com', 'openai.com', 'platform.openai.com', 'chat.openai.com',
+    'claude.ai', 'anthropic.com', 'console.anthropic.com',
+    'gemini.google.com', 'bard.google.com', 'ai.google',
+    'copilot.microsoft.com', 'bing.microsoft.com',
+    'perplexity.ai',
+    'midjourney.com', 'stability.ai', 'huggingface.co', 'hf.co',
+    'replicate.com', 'together.ai', 'groq.com', 'mistral.ai',
+    'cohere.com', 'cohere.ai', 'ollama.com', 'ollama.ai',
+    'cursor.com', 'cursor.sh', 'codeium.com', 'tabnine.com',
+    'replit.com', 'v0.dev', 'lovable.dev', 'bolt.new',
+    'runway.ml', 'elevenlabs.io', 'suno.com', 'suno.ai',
+    # Consumer & Entertainment
+    'hulu.com', 'disneyplus.com', 'primevideo.com',
+    'twitch.tv', 'vimeo.com', 'dailymotion.com',
+    'soundcloud.com', 'music.apple.com',
+    'venmo.com', 'cash.app', 'wise.com', 'revolut.com',
+    'doordash.com', 'ubereats.com', 'grubhub.com', 'instacart.com',
+    'indeed.com', 'glassdoor.com', 'naukri.com',
+    'quora.com', 'pinterest.com', 'tumblr.com', 'flickr.com',
+    'messenger.com', 'threads.net', 'tiktok.com', 'snapchat.com',
+    'ajio.com', 'meesho.com', 'nykaa.com', 'snapdeal.com',
+    'tata.com', 'reliance.com',
+    'irctc.co.in', 'makemytrip.com', 'goibibo.com', 'yatra.com',
+    'bookmyshow.com', 'pvr.com', 'inox.com',
+    'udacity.com', 'byjus.com', 'unacademy.com', 'vedantu.com', 'toppr.com',
+    'duolingo.com', 'brilliant.org', 'codecademy.com',
+    'gaana.com', 'wynk.in', 'jiosaavn.com',
+    'hotstar.com', 'sonyliv.com', 'zee5.com', 'voot.com',
+    'moneycontrol.com', 'economictimes.com', 'livemint.com',
+    'timesofindia.com', 'hindustantimes.com', 'ndtv.com',
+    'thehindu.com', 'indianexpress.com', 'business-standard.com',
 ]
 
 
 def is_known_benign(domain):
-    """Check if domain is a known benign service"""
     domain = domain.lower().strip()
     if domain.startswith('www.'):
         domain = domain[4:]
@@ -125,30 +152,23 @@ def is_known_benign(domain):
 
 
 def extract_url_features(url):
-    """Extract 26 features from URL"""
     features = []
-    
     try:
         url_lower = str(url).lower()
         if not url_lower.startswith(('http://', 'https://')):
             url_lower = 'http://' + url_lower
-        
         parsed = urlparse(url_lower)
         domain = parsed.netloc.lower()
         path = parsed.path.lower()
-        
         features.append(min(len(url_lower) / 100.0, 2.0))
         features.append(min(len(domain) / 50.0, 2.0))
         features.append(min(len(path) / 100.0, 2.0))
         features.append(min(domain.count('.'), 5))
         features.append(max(0, min(domain.count('.') - 1, 5)))
         features.append(1 if re.search(r'\d+\.\d+\.\d+\.\d+', domain) else 0)
-        
         suspicious_tlds = ['.tk', '.ml', '.ga', '.cf', '.top', '.xyz', '.club', '.site',
                            '.online', '.work', '.click', '.link', '.review', '.country']
         features.append(1 if any(domain.endswith(tld) for tld in suspicious_tlds) else 0)
-        
-        # Phishing keywords — only if in domain or path segment
         phishing_words = ['login', 'verify', 'secure', 'update', 'confirm', 'account',
                           'banking', 'password', 'credential', 'signin', 'auth', 'recovery',
                           'validation', 'unlock', 'restore', 'suspended']
@@ -159,32 +179,26 @@ def extract_url_features(url):
             elif f'/{w}/' in path or f'/{w}.' in path or path.endswith(f'/{w}'):
                 keyword_count += 1
         features.append(min(keyword_count / 3.0, 2.0))
-        
         brands = ['paypal', 'google', 'amazon', 'facebook', 'apple', 'microsoft',
                   'netflix', 'instagram', 'whatsapp', 'twitter', 'linkedin',
                   'chase', 'wellsfargo', 'citibank', 'bankofamerica', 'coinbase',
                   'binance', 'metamask', 'blockchain', 'bank']
         brand_count = sum(1 for b in brands if b in url_lower)
         features.append(min(brand_count, 3))
-        
         typo_count = sum(1 for c in domain if c in ['0', '1', '3', '4', '5', '7'])
         features.append(min(typo_count / 3.0, 2.0))
         features.append(min(domain.count('-') / 2.0, 2.0))
-        
         shorteners = ['bit.ly', 'tinyurl', 'goo.gl', 'ow.ly', 'is.gd', 'buff.ly',
                       'shorturl', 'tiny.cc', 'tr.im', 'v.gd', 't.co']
         features.append(1 if any(s in domain for s in shorteners) else 0)
-        
         features.append(1 if url_lower.startswith('https') else 0)
         features.append(1 if '@' in url_lower else 0)
         features.append(1 if '//' in url_lower[8:] else 0)
         features.append(min(url_lower.count('=') / 3.0, 2.0))
         features.append(min(url_lower.count('&') / 2.0, 2.0))
-        
         url_no_fragment = url_lower.split('#')[0]
         special_count = sum(1 for c in url_no_fragment if c in '!@#$%^&*()')
         features.append(min(special_count / 3.0, 2.0))
-        
         if domain:
             domain_chars = Counter(domain)
             entropy = -sum((count/len(domain)) * np.log2(count/len(domain))
@@ -192,31 +206,24 @@ def extract_url_features(url):
             features.append(entropy / 5.0)
         else:
             features.append(0)
-        
         features.append(min(path.count('/') / 3.0, 2.0))
         features.append(1 if domain.startswith('www.') else 0)
         features.append(1 if domain.count('.') > 3 else 0)
         features.append(1 if any(url_lower.endswith(ext) for ext in
                                  ['.exe', '.zip', '.rar', '.scr', '.apk', '.msi', '.dmg']) else 0)
-        
         benign_tlds = ['.com', '.org', '.net', '.edu', '.gov', '.io', '.co']
         has_suspicious = any(w in url_lower for w in ['verify', 'secure-login', 'account-update'])
         features.append(1 if (any(domain.endswith(tld) for tld in benign_tlds)
                               and not has_suspicious) else 0)
-        
         features.append(1 if is_known_benign(domain) else 0)
-        
         path_has_brand = any(b in path for b in brands)
         features.append(1 if path_has_brand else 0)
-        
     except Exception:
         return np.zeros(26)
-    
     return np.array(features, dtype=np.float32)
 
 
 def analyze_url(url: str, model_type: str = 'qr') -> dict:
-    """Analyze URL for phishing"""
     if model_type == 'phishing' and PHISHING_MODELS_LOADED:
         active_xgb = phishing_xgb
         active_rf = phishing_rf
@@ -226,72 +233,54 @@ def analyze_url(url: str, model_type: str = 'qr') -> dict:
         active_rf = rf_model
         active_scaler = scaler
     else:
-        return {
-            'is_malicious': False,
-            'confidence': 0.5,
-            'risk_factors': ['Model not loaded'],
-            'url': url
-        }
+        return {'is_malicious': False, 'confidence': 0.5, 'risk_factors': ['Model not loaded'], 'url': url}
     
     if not url.startswith(('http://', 'https://')):
         url = 'https://' + url
     
-    # ============ KNOWN BENIGN OVERRIDE ============
+    # Known benign check
     try:
         parsed = urlparse(url.lower())
         domain = parsed.netloc.lower()
-        
         if is_known_benign(domain):
             print(f"✅ Known benign domain: {domain}")
             return {
-                'is_malicious': False,
-                'confidence': 0.02,
-                'xgb_score': 0.02,
-                'rf_score': 0.02,
-                'risk_factors': ['✅ Verified official service'],
-                'url': url
+                'is_malicious': False, 'confidence': 0.02,
+                'xgb_score': 0.02, 'rf_score': 0.02,
+                'risk_factors': ['✅ Verified official service'], 'url': url
             }
     except Exception as e:
         print(f"Known benign check error: {e}")
     
-    # ============ SMART OVERRIDE: trusted TLD + blog/news path ============
+    # Trusted TLD + content path
     try:
         parsed = urlparse(url.lower())
         domain = parsed.netloc.lower()
         path = parsed.path.lower()
-        
         trusted_tlds = ['.com', '.org', '.net', '.edu', '.gov', '.io', '.co', '.dev']
         trusted_paths = ['/blog/', '/news/', '/article/', '/post/', '/docs/', '/wiki/', '/extensions/']
-        
         is_trusted_tld = any(domain.endswith(tld) for tld in trusted_tlds)
         has_trusted_path = any(p in path for p in trusted_paths)
-        
         hard_signals = ['paypa1', 'amaz0n', 'go0gle', 'faceb00k', 'app1e', 'micr0soft',
                        '.tk', '.ml', '.ga', '.cf', '.top', '.xyz']
         has_hard_signal = any(sig in domain for sig in hard_signals)
-        
         if is_trusted_tld and has_trusted_path and not has_hard_signal:
             print(f"✅ Trusted TLD + content path: {domain}")
             return {
-                'is_malicious': False,
-                'confidence': 0.15,
-                'xgb_score': 0.15,
-                'rf_score': 0.15,
-                'risk_factors': ['✅ Trusted domain with content path'],
-                'url': url
+                'is_malicious': False, 'confidence': 0.15,
+                'xgb_score': 0.15, 'rf_score': 0.15,
+                'risk_factors': ['✅ Trusted domain with content path'], 'url': url
             }
     except Exception as e:
         print(f"Trusted path check error: {e}")
     
-    # ============ ML PREDICTION ============
+    # ML prediction
     try:
         features = extract_url_features(url).reshape(1, -1)
         features_scaled = active_scaler.transform(features)
-        
         xgb_prob = float(active_xgb.predict_proba(features_scaled)[0][1])
         rf_prob = float(active_rf.predict_proba(features_scaled)[0][1])
         avg_prob = (xgb_prob + rf_prob) / 2
-        
         is_malicious = avg_prob > 0.5
         
         risk_factors = []
@@ -313,8 +302,17 @@ def analyze_url(url: str, model_type: str = 'qr') -> dict:
                 risk_factors.append(f"Typosquatting: {typo}")
                 break
         
+        # CRITICAL: Don't block if no specific risk factors
         if not risk_factors:
-            risk_factors = ['No obvious threats detected']
+            print(f"⚠️ Model flagged {url} ({avg_prob*100:.1f}%) but no threats — allowing")
+            return {
+                'is_malicious': False,
+                'confidence': 0.3,
+                'xgb_score': xgb_prob,
+                'rf_score': rf_prob,
+                'risk_factors': ['Model flagged but no specific threats identified'],
+                'url': url
+            }
         
         return {
             'is_malicious': is_malicious,
@@ -326,29 +324,23 @@ def analyze_url(url: str, model_type: str = 'qr') -> dict:
         }
     except Exception as e:
         return {
-            'is_malicious': False,
-            'confidence': 0.5,
-            'risk_factors': [f'Error: {str(e)}'],
-            'url': url
+            'is_malicious': False, 'confidence': 0.5,
+            'risk_factors': [f'Error: {str(e)}'], 'url': url
         }
 
 
 def clean_decoded_content(content):
     if not content:
         return content
-    original = str(content)
-    cleaned = original.strip()
+    cleaned = str(content).strip()
     url_match = re.search(r'https?://[^\s\'"\]\},]+', cleaned)
     if url_match:
-        cleaned = url_match.group(0)
-        cleaned = cleaned.rstrip('.,;:)]}')
+        cleaned = url_match.group(0).rstrip('.,;:)]}')
     else:
         cleaned = re.sub(r'^\d+\s+', '', cleaned)
         cleaned = re.sub(r'\s+Name:.*$', '', cleaned)
         cleaned = re.sub(r',\s*dtype:.*$', '', cleaned)
         cleaned = cleaned.strip().strip("'\"[]")
-    print(f"🧹 Original: {original[:100]}")
-    print(f"🧹 Cleaned:  {cleaned[:100]}")
     return cleaned
 
 
@@ -357,34 +349,25 @@ def decode_qr_multi_method(image_np):
         from pyzbar.pyzbar import decode as pyzbar_decode
         decoded = pyzbar_decode(image_np)
         if decoded:
-            data = decoded[0].data.decode('utf-8')
-            print(f"✅ pyzbar: {data[:60]}")
-            return data
-    except Exception as e:
-        print(f"pyzbar error: {e}")
-    
+            return decoded[0].data.decode('utf-8')
+    except Exception:
+        pass
     try:
         from pyzbar.pyzbar import decode as pyzbar_decode
         pil_img = Image.fromarray(image_np)
         decoded = pyzbar_decode(pil_img)
         if decoded:
-            data = decoded[0].data.decode('utf-8')
-            print(f"✅ pyzbar PIL: {data[:60]}")
-            return data
+            return decoded[0].data.decode('utf-8')
     except Exception:
         pass
-    
     try:
         image_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR) if len(image_np.shape) == 3 else cv2.cvtColor(image_np, cv2.COLOR_GRAY2BGR)
         detector = cv2.QRCodeDetector()
         data, _, _ = detector.detectAndDecode(image_bgr)
         if data:
-            print(f"✅ OpenCV: {data[:60]}")
             return data
     except Exception:
         pass
-    
-    print("❌ All decoding methods failed")
     return None
 
 
@@ -425,8 +408,6 @@ def setup_ml_routes(app: FastAPI):
             if image_pil.mode != 'RGB':
                 image_pil = image_pil.convert('RGB')
             image_np = np.array(image_pil)
-            print(f"📷 Image: {image_pil.mode} {image_pil.size}")
-            
             raw_content = decode_qr_multi_method(image_np)
             if not raw_content:
                 return ScanResponse(
@@ -435,10 +416,8 @@ def setup_ml_routes(app: FastAPI):
                     decoded_content="No QR code found in image",
                     risk_factors=['No QR code detected'], threshold_used=0.5
                 )
-            
             cleaned_content = clean_decoded_content(raw_content)
             result = analyze_url(cleaned_content, model_type='qr')
-            
             return ScanResponse(
                 success=True,
                 is_malicious=result['is_malicious'],
@@ -451,9 +430,6 @@ def setup_ml_routes(app: FastAPI):
                 threshold_used=0.5
             )
         except Exception as e:
-            print(f"❌ Scan error: {e}")
-            import traceback
-            traceback.print_exc()
             raise HTTPException(status_code=500, detail=str(e))
     
     @app.get("/ml/health")
