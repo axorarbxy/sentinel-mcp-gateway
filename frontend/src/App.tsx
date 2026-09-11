@@ -17,6 +17,9 @@ import Register from './pages/Register';
 import Landing from './pages/Landing';
 import ModuleDashboard from './pages/ModuleDashboard';
 import MCPDashboard from './pages/MCPDashboard';
+import MCPAgentDetail from './pages/MCPAgentDetail';
+import MCPPolicyDetail from './pages/MCPPolicyDetail';
+import MCPServerDetail from './pages/MCPServerDetail';
 
 // Module Pages
 import PhishingModule from './pages/modules/PhishingModule';
@@ -294,6 +297,8 @@ function App() {
               </ProtectedRoute>
             }
           />
+
+          {/* ============ MCP ROUTES ============ */}
           <Route
             path="/mcp"
             element={
@@ -304,6 +309,38 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/mcp/agents/:id"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <MCPAgentDetail />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/mcp/policies/:id"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <MCPPolicyDetail />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/mcp/servers/:id"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <MCPServerDetail />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ============ MODULE ROUTES ============ */}
           <Route
             path="/modules/phishing"
             element={
@@ -374,6 +411,7 @@ function App() {
               </ProtectedRoute>
             }
           />
+
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </HashRouter>
