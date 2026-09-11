@@ -1,10 +1,13 @@
 """
 Sentinel-MCP Gateway - AI/ML Security Monitoring Framework
-Complete with Security Policies + ML Anomaly Detection + CyberEye Modules + Authentication + MCP Management
+Complete with Security Policies + ML Anomaly Detection + CyberEye Modules + Authentication + MCP Management + API Key Auth + WebSocket
 """
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from typing import Set
+import asyncio
 import uvicorn
 import json
 import logging
@@ -67,15 +70,161 @@ blocked_requests = []
 anomaly_alerts = []
 
 
-# ============ MCP PROXY ENDPOINT ============
-@app.post("/mcp/proxy")
-async def mcp_proxy(request: Request):
+# ============ WEBSOCKET MANAGER ============
+class TrafficBroadcaster:
+    """Manages WebSocket connections for live traffic updates"""
+    def __init__(self):
+        self.active_connections: Set[WebSocket] = set()
+        self.lock = asyncio.Lock()
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        async with self.lock:
+            self.active_connections.add(websocket)
+        logger.info(f"🔌 WebSocket connected (total: {len(self.active_connections)})")
+
+    async def disconnect(self, websocket: WebSocket):
+        async with self.lock:
+            self.active_connections.discard(websocket)
+        logger.info(f"🔌 WebSocket disconnected (total: {len(self.active_connections)})")
+
+    async def broadcast(self, message: dict):
+        """Send message to all connected clients"""
+        if not self.active_connections:
+            return
+
+        async with self.lock:
+            connections = list(self.active_connections)
+
+        dead_connections = set()
+        for connection in connections:
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                logger.error(f"WebSocket send error: {e}")
+                dead_connections.add(connection)
+
+        # Clean up dead connections
+        if dead_connections:
+            async with self.lock:
+                for conn in dead_connections:
+                    self.active_connections.discard(conn)
+
+
+# Global broadcaster instance
+traffic_broadcaster = TrafficBroadcaster()
+
+
+# ============ AUTH HELPER ============
+def verify_agent_api_key(api_key: str):
     """
-    Main MCP proxy endpoint - evaluates requests with policies + ML anomaly detection
-    Note: Using /mcp/proxy to avoid conflict with /mcp/agents etc.
+    Verify API key against registered MCP agents
+    Returns: (agent_object, error_message)
     """
     from database import SessionLocal, MCPAgent
 
+    if not api_key:
+        return None, "Missing API key"
+
+    try:
+        db = SessionLocal()
+        agent = db.query(MCPAgent).filter(MCPAgent.api_key == api_key).first()
+
+        if not agent:
+            db.close()
+            return None, "Invalid API key"
+
+        if not agent.is_active:
+            db.close()
+            return None, "Agent is suspended"
+
+        # Return agent info (detach from session)
+        agent_info = {
+            "id": agent.id,
+            "name": agent.name,
+            "api_key": agent.api_key,
+            "is_active": agent.is_active,
+        }
+        db.close()
+        return agent_info, None
+
+    except Exception as e:
+        logger.error(f"API key verification error: {e}")
+        return None, f"Authentication error: {str(e)}"
+
+
+# ============ MCP PROXY ENDPOINT (AUTHENTICATED) ============
+@app.post("/mcp/proxy")
+async def mcp_proxy(request: Request):
+    """
+    Main MCP proxy endpoint - REQUIRES API KEY AUTHENTICATION
+    Header: Authorization: Bearer sk_sentinel_xxxxx
+    """
+    from database import SessionLocal, MCPAgent
+
+    # ============ STEP 1: AUTHENTICATION ============
+    auth_header = request.headers.get("Authorization", "")
+
+    if not auth_header:
+        logger.warning("🚫 Request rejected: Missing Authorization header")
+        return JSONResponse(
+            status_code=401,
+            content={
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32001,
+                    "message": "Unauthorized",
+                    "data": {
+                        "reason": "Missing Authorization header",
+                        "hint": "Add header: Authorization: Bearer sk_sentinel_xxxxx"
+                    }
+                }
+            }
+        )
+
+    # Check Bearer format
+    if not auth_header.startswith("Bearer "):
+        logger.warning("🚫 Request rejected: Invalid Authorization format")
+        return JSONResponse(
+            status_code=401,
+            content={
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32001,
+                    "message": "Unauthorized",
+                    "data": {
+                        "reason": "Invalid Authorization format",
+                        "hint": "Expected: Bearer sk_sentinel_xxxxx"
+                    }
+                }
+            }
+        )
+
+    api_key = auth_header.replace("Bearer ", "").strip()
+
+    # Verify against database
+    agent_info, error = verify_agent_api_key(api_key)
+
+    if error:
+        logger.warning(f"🚫 Request rejected: {error}")
+        return JSONResponse(
+            status_code=401,
+            content={
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32001,
+                    "message": "Unauthorized",
+                    "data": {
+                        "reason": error
+                    }
+                }
+            }
+        )
+
+    # Authenticated ✅
+    logger.info(f"✅ Authenticated: Agent '{agent_info['name']}' (ID: {agent_info['id']})")
+
+    # ============ STEP 2: PROCESS REQUEST ============
     body = await request.body()
 
     try:
@@ -85,7 +234,8 @@ async def mcp_proxy(request: Request):
 
     method = data.get("method", "unknown")
     params = data.get("params", {})
-    agent_id = data.get("agent_id", "default-agent")
+    # Use agent name from DB (not from request body)
+    agent_id = agent_info["name"]
 
     # 1. Policy evaluation (rule-based)
     policy_result = policy_engine.evaluate(method, params)
@@ -159,11 +309,7 @@ async def mcp_proxy(request: Request):
     # ============ UPDATE AGENT COUNTERS IN DATABASE ============
     try:
         db = SessionLocal()
-        # Find agent by name (matches AGENT_ID from test script)
-        agent = db.query(MCPAgent).filter(MCPAgent.name == agent_id).first()
-        if not agent:
-            # Fallback: use first agent
-            agent = db.query(MCPAgent).first()
+        agent = db.query(MCPAgent).filter(MCPAgent.id == agent_info["id"]).first()
 
         if agent:
             agent.total_requests = (agent.total_requests or 0) + 1
@@ -185,6 +331,28 @@ async def mcp_proxy(request: Request):
         logger.warning(f"❌ BLOCKED: {method} - {'; '.join(block_reasons)}")
     else:
         logger.info(f"✅ ALLOWED: {method} - {policy_result.reason}")
+
+    # ============ BROADCAST TO WEBSOCKET CLIENTS ============
+    try:
+        event = {
+            "type": "new_request",
+            "data": {
+                "timestamp": log_entry["timestamp"],
+                "agent_id": agent_id,
+                "method": method,
+                "params": params,
+                "allowed": not should_block,
+                "reason": policy_result.reason if not should_block else "; ".join(block_reasons),
+                "ml_anomaly": is_ml_anomaly,
+                "total_requests": len(request_log),
+                "total_blocked": len(blocked_requests),
+                "total_anomalies": len(anomaly_alerts),
+            },
+            "timestamp": datetime.now().isoformat(),
+        }
+        await traffic_broadcaster.broadcast(event)
+    except Exception as e:
+        logger.error(f"Broadcast error: {e}")
 
     # Return response
     if should_block:
@@ -212,6 +380,47 @@ async def mcp_proxy(request: Request):
             "analysis": analysis_result
         }
     }
+
+
+# ============ WEBSOCKET: LIVE TRAFFIC ============
+@app.websocket("/mcp/ws/traffic")
+async def websocket_traffic(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time MCP traffic updates
+    Pushes new events as they happen
+    """
+    await traffic_broadcaster.connect(websocket)
+
+    try:
+        # Send initial snapshot on connect
+        await websocket.send_json({
+            "type": "snapshot",
+            "data": {
+                "total_requests": len(request_log),
+                "total_blocked": len(blocked_requests),
+                "total_anomalies": len(anomaly_alerts),
+                "recent_logs": request_log[-10:],
+            },
+            "timestamp": datetime.now().isoformat(),
+        })
+
+        # Keep connection alive
+        while True:
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                if data == "ping":
+                    await websocket.send_json({"type": "pong"})
+            except asyncio.TimeoutError:
+                try:
+                    await websocket.send_json({"type": "heartbeat"})
+                except:
+                    break
+
+    except WebSocketDisconnect:
+        await traffic_broadcaster.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        await traffic_broadcaster.disconnect(websocket)
 
 
 # ============ CYBEREYE ENDPOINTS ============
@@ -277,7 +486,9 @@ async def health_check():
         "anomalies": len(anomaly_alerts),
         "ml_models": len(behavioral_monitor.models),
         "policies": "active",
-        "cybereye_modules": len(cybereye.modules)
+        "cybereye_modules": len(cybereye.modules),
+        "auth_enabled": True,
+        "websocket_connections": len(traffic_broadcaster.active_connections),
     }
 
 
@@ -339,6 +550,8 @@ async def root():
     return {
         "service": "Sentinel-MCP Gateway",
         "version": "2.0.0",
+        "auth_required": True,
+        "websocket": "ws://localhost:8001/mcp/ws/traffic",
         "endpoints": {
             "auth": {
                 "register": "/auth/register (POST)",
@@ -348,7 +561,8 @@ async def root():
                 "me": "/auth/me (GET)"
             },
             "mcp": {
-                "proxy": "/mcp/proxy (POST)",
+                "proxy": "/mcp/proxy (POST) [REQUIRES API KEY]",
+                "websocket": "/mcp/ws/traffic (WS)",
                 "overview": "/mcp/overview (GET)",
                 "agents": "/mcp/agents (GET/POST)",
                 "agent_detail": "/mcp/agents/{id} (GET/DELETE)",
@@ -391,16 +605,10 @@ if __name__ == "__main__":
     print(f"   - {len(cybereye.modules)} modules loaded")
     print("🔐 Authentication: ENABLED")
     print("🎛️ MCP Management: ENABLED")
+    print("🔑 API Key Auth: ENABLED (for /mcp/proxy)")
+    print("📡 WebSocket Live Traffic: ENABLED")
     print("🤖 ML QR Scanner: ENABLED")
     print("📡 Listening on http://localhost:8001")
-    print("")
-    print("📊 Dashboards:")
-    print("   - Main: http://localhost:8001/")
-    print("   - MCP Overview: http://localhost:8001/mcp/overview")
-    print("   - MCP Agents: http://localhost:8001/mcp/agents")
-    print("   - MCP Policies: http://localhost:8001/mcp/policies")
-    print("   - MCP Servers: http://localhost:8001/mcp/servers")
-    print("   - ML Health: http://localhost:8001/ml/health")
     print("")
     print("💡 Implements:")
     print("   - SECUREVENT (arXiv 2606.01741) hybrid approach")
@@ -409,5 +617,7 @@ if __name__ == "__main__":
     print("   - Behavioral analysis (layer 2)")
     print("   - ML anomaly detection (layer 3)")
     print("   - JWT Authentication (layer 4)")
-    print("   - MCP Management (layer 5)")
+    print("   - API Key Auth (layer 5)")
+    print("   - MCP Management (layer 6)")
+    print("   - WebSocket Live Traffic (layer 7)")
     uvicorn.run(app, host="0.0.0.0", port=8001)

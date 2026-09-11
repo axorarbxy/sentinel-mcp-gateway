@@ -1,5 +1,6 @@
 // pages/MCPDashboard.tsx
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Paper,
@@ -45,7 +46,10 @@ import {
   Speed as SpeedIcon,
   VpnKey as KeyIcon,
   Cloud as CloudIcon,
+  FiberManualRecord as LiveIcon,
+  WifiOff as WifiOffIcon,
 } from '@mui/icons-material';
+import useLiveTraffic, { TrafficEvent } from '../hooks/useLiveTraffic';
 
 const API_URL = 'http://localhost:8001';
 
@@ -95,6 +99,7 @@ interface MCPServer {
 
 // ============ MAIN COMPONENT ============
 const MCPDashboard: React.FC = () => {
+  const navigate = useNavigate();
   const [tabValue, setTabValue] = useState(0);
   const [overview, setOverview] = useState<MCPOverview | null>(null);
   const [agents, setAgents] = useState<MCPAgent[]>([]);
@@ -102,6 +107,14 @@ const MCPDashboard: React.FC = () => {
   const [servers, setServers] = useState<MCPServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Live traffic via WebSocket
+  const {
+    connected: wsConnected,
+    events: liveEvents,
+    liveStats,
+    clearEvents,
+  } = useLiveTraffic({ enabled: true, maxEvents: 50 });
 
   // Dialog states
   const [addAgentOpen, setAddAgentOpen] = useState(false);
@@ -160,9 +173,21 @@ const MCPDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchAll();
-    const interval = setInterval(fetchAll, 10000);
+    // Slower fallback polling (WebSocket handles real-time)
+    const interval = setInterval(() => fetchAll(), 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // Auto-refresh agents table when live events arrive
+  useEffect(() => {
+    if (liveEvents.length > 0) {
+      // Refresh agents list (for updated counters)
+      fetch(`${API_URL}/mcp/agents`)
+        .then((res) => res.ok && res.json())
+        .then((data) => data && setAgents(data))
+        .catch(() => {});
+    }
+  }, [liveEvents.length]);
 
   // ============ CREATE AGENT ============
   const handleCreateAgent = async () => {
@@ -330,6 +355,14 @@ const MCPDashboard: React.FC = () => {
     );
   }
 
+  // Use live stats if available, else DB stats
+  const effectiveTotal = wsConnected && liveStats.total_requests > 0
+    ? liveStats.total_requests
+    : overview?.traffic.total_requests || 0;
+  const effectiveBlocked = wsConnected && liveStats.total_requests > 0
+    ? liveStats.total_blocked
+    : overview?.traffic.blocked_requests || 0;
+
   return (
     <Box sx={{ p: 3, maxWidth: 1400, mx: 'auto' }}>
       {/* Header */}
@@ -356,7 +389,22 @@ const MCPDashboard: React.FC = () => {
               </Typography>
             </Box>
           </Box>
-          <Box sx={{ display: 'flex', gap: 1 }}>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+            {/* WebSocket Status */}
+            <Chip
+              icon={wsConnected ? <LiveIcon /> : <WifiOffIcon />}
+              label={wsConnected ? 'LIVE' : 'OFFLINE'}
+              color={wsConnected ? 'success' : 'error'}
+              size="small"
+              sx={{
+                fontWeight: 700,
+                animation: wsConnected ? 'pulse 2s infinite' : 'none',
+                '@keyframes pulse': {
+                  '0%, 100%': { opacity: 1 },
+                  '50%': { opacity: 0.6 },
+                },
+              }}
+            />
             <Tooltip title="Refresh">
               <IconButton onClick={() => fetchAll(true)} disabled={refreshing}>
                 {refreshing ? <CircularProgress size={24} /> : <RefreshIcon />}
@@ -367,81 +415,142 @@ const MCPDashboard: React.FC = () => {
       </Paper>
 
       {/* Overview Stats */}
-      {overview && (
-        <Grid container spacing={3} sx={{ mb: 3 }}>
-          <Grid size={{ xs: 6, sm: 3 }}>
-            <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(144,202,249,0.15)' }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                  <PersonIcon color="primary" />
-                  <Typography variant="caption" color="textSecondary">
-                    AGENTS
-                  </Typography>
-                </Box>
-                <Typography variant="h4" sx={{ fontWeight: 700 }}>
-                  {overview.agents.total}
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(144,202,249,0.15)' }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                <PersonIcon color="primary" />
+                <Typography variant="caption" color="textSecondary">
+                  AGENTS
                 </Typography>
-                <Typography variant="caption" color="success.main">
-                  {overview.agents.active} active
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid size={{ xs: 6, sm: 3 }}>
-            <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(76,175,80,0.15)' }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                  <CloudIcon color="success" />
-                  <Typography variant="caption" color="textSecondary">
-                    SERVERS
-                  </Typography>
-                </Box>
-                <Typography variant="h4" sx={{ fontWeight: 700 }}>
-                  {overview.servers.total}
-                </Typography>
-                <Typography variant="caption" color="success.main">
-                  {overview.servers.online} online
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid size={{ xs: 6, sm: 3 }}>
-            <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(255,152,0,0.15)' }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                  <SecurityIcon color="warning" />
-                  <Typography variant="caption" color="textSecondary">
-                    POLICIES
-                  </Typography>
-                </Box>
-                <Typography variant="h4" sx={{ fontWeight: 700 }}>
-                  {overview.policies.total}
-                </Typography>
-                <Typography variant="caption" color="warning.main">
-                  {overview.policies.enabled} enabled
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid size={{ xs: 6, sm: 3 }}>
-            <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(244,67,54,0.15)' }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                  <SpeedIcon color="error" />
-                  <Typography variant="caption" color="textSecondary">
-                    TRAFFIC
-                  </Typography>
-                </Box>
-                <Typography variant="h4" sx={{ fontWeight: 700 }}>
-                  {overview.traffic.total_requests}
-                </Typography>
-                <Typography variant="caption" color="error.main">
-                  {overview.traffic.blocked_requests} blocked
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
+              </Box>
+              <Typography variant="h4" sx={{ fontWeight: 700 }}>
+                {overview?.agents.total || 0}
+              </Typography>
+              <Typography variant="caption" color="success.main">
+                {overview?.agents.active || 0} active
+              </Typography>
+            </CardContent>
+          </Card>
         </Grid>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(76,175,80,0.15)' }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                <CloudIcon color="success" />
+                <Typography variant="caption" color="textSecondary">
+                  SERVERS
+                </Typography>
+              </Box>
+              <Typography variant="h4" sx={{ fontWeight: 700 }}>
+                {overview?.servers.total || 0}
+              </Typography>
+              <Typography variant="caption" color="success.main">
+                {overview?.servers.online || 0} online
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(255,152,0,0.15)' }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                <SecurityIcon color="warning" />
+                <Typography variant="caption" color="textSecondary">
+                  POLICIES
+                </Typography>
+              </Box>
+              <Typography variant="h4" sx={{ fontWeight: 700 }}>
+                {overview?.policies.total || 0}
+              </Typography>
+              <Typography variant="caption" color="warning.main">
+                {overview?.policies.enabled || 0} enabled
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Card
+            sx={{
+              bgcolor: 'rgba(26,35,50,0.8)',
+              border: wsConnected ? '2px solid rgba(76,175,80,0.5)' : '1px solid rgba(244,67,54,0.15)',
+              transition: 'all 0.3s',
+            }}
+          >
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                <SpeedIcon color="error" />
+                <Typography variant="caption" color="textSecondary">
+                  TRAFFIC {wsConnected && '🔴'}
+                </Typography>
+              </Box>
+              <Typography variant="h4" sx={{ fontWeight: 700 }}>
+                {effectiveTotal}
+              </Typography>
+              <Typography variant="caption" color="error.main">
+                {effectiveBlocked} blocked
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      {/* Live Traffic Feed */}
+      {wsConnected && liveEvents.length > 0 && (
+        <Paper
+          sx={{
+            p: 2,
+            mb: 3,
+            bgcolor: 'rgba(26,35,50,0.8)',
+            border: '1px solid rgba(76,175,80,0.3)',
+          }}
+        >
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <LiveIcon sx={{ color: '#f44336', animation: 'pulse 1.5s infinite' }} />
+              <Typography variant="h6">Live Traffic Feed</Typography>
+              <Chip size="small" label={`${liveEvents.length} events`} />
+            </Box>
+            <Button size="small" onClick={clearEvents}>
+              Clear
+            </Button>
+          </Box>
+          <Divider sx={{ mb: 2 }} />
+          <Box sx={{ maxHeight: 300, overflowY: 'auto' }}>
+            {liveEvents.slice(0, 10).map((event, idx) => (
+              <Box
+                key={idx}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 2,
+                  p: 1,
+                  mb: 0.5,
+                  borderRadius: 1,
+                  bgcolor: event.allowed ? 'rgba(76,175,80,0.05)' : 'rgba(244,67,54,0.05)',
+                  borderLeft: `3px solid ${event.allowed ? '#4caf50' : '#f44336'}`,
+                }}
+              >
+                <Typography variant="caption" sx={{ fontFamily: 'monospace', minWidth: 80 }}>
+                  {new Date(event.timestamp).toLocaleTimeString()}
+                </Typography>
+                <Chip
+                  size="small"
+                  label={event.allowed ? 'ALLOW' : 'BLOCK'}
+                  color={event.allowed ? 'success' : 'error'}
+                  sx={{ minWidth: 70 }}
+                />
+                <Typography variant="caption" sx={{ fontFamily: 'monospace', minWidth: 180 }}>
+                  {event.method}
+                </Typography>
+                <Typography variant="caption" color="textSecondary" noWrap sx={{ flex: 1 }}>
+                  {event.agent_id}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+        </Paper>
       )}
 
       {/* Tabs */}
@@ -496,7 +605,16 @@ const MCPDashboard: React.FC = () => {
                     <TableRow key={agent.id} hover>
                       <TableCell>#{agent.id}</TableCell>
                       <TableCell>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            color: 'primary.main',
+                            '&:hover': { textDecoration: 'underline' },
+                          }}
+                          onClick={() => navigate(`/mcp/agents/${agent.id}`)}
+                        >
                           {agent.name}
                         </Typography>
                         <Typography variant="caption" color="textSecondary">
@@ -603,7 +721,16 @@ const MCPDashboard: React.FC = () => {
                     <TableRow key={policy.id} hover>
                       <TableCell>#{policy.id}</TableCell>
                       <TableCell>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            color: 'primary.main',
+                            '&:hover': { textDecoration: 'underline' },
+                          }}
+                          onClick={() => navigate(`/mcp/policies/${policy.id}`)}
+                        >
                           {policy.name}
                         </Typography>
                         <Typography variant="caption" color="textSecondary">
@@ -691,7 +818,16 @@ const MCPDashboard: React.FC = () => {
                     <TableRow key={server.id} hover>
                       <TableCell>#{server.id}</TableCell>
                       <TableCell>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            color: 'primary.main',
+                            '&:hover': { textDecoration: 'underline' },
+                          }}
+                          onClick={() => navigate(`/mcp/servers/${server.id}`)}
+                        >
                           {server.name}
                         </Typography>
                         <Typography variant="caption" color="textSecondary">

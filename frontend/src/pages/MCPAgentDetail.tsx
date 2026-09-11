@@ -46,6 +46,9 @@ import {
   Refresh as RefreshIcon,
   ContentCopy as CopyIcon,
   TrendingUp as TrendingUpIcon,
+  Code as CodeIcon,
+  Terminal as TerminalIcon,
+  Lock as LockIcon,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 
@@ -110,7 +113,6 @@ const MCPAgentDetail: React.FC = () => {
 
       if (logsRes.ok) {
         const data = await logsRes.json();
-        // Filter logs for this specific agent
         const filtered = (data.logs || []).filter(
           (log: LogEntry) => log.agent_id === `agent-${id}` || log.agent_id === String(id)
         );
@@ -155,18 +157,46 @@ const MCPAgentDetail: React.FC = () => {
     }
   };
 
-  const copyApiKey = () => {
-    if (!agent) return;
-    navigator.clipboard.writeText(agent.api_key);
-    showSnackbar('API key copied to clipboard', 'success');
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    showSnackbar(`${label} copied to clipboard`, 'success');
   };
 
-  // ============ COMPUTED STATS ============
+  // ============ COMPUTED ============
   const blockRate = agent && agent.total_requests > 0
     ? (agent.blocked_requests / agent.total_requests) * 100
     : 0;
 
   const allowedRequests = agent ? agent.total_requests - agent.blocked_requests : 0;
+
+  // cURL command generator
+  const curlCommand = agent ? `curl -X POST http://localhost:8001/mcp/proxy \\
+  -H "Authorization: Bearer ${agent.api_key}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "filesystem/read",
+    "params": {"path": "/home/user/test.txt"},
+    "id": 1
+  }'` : '';
+
+  // Python sample code
+  const pythonCode = agent ? `import httpx
+
+response = httpx.post(
+    "http://localhost:8001/mcp/proxy",
+    headers={
+        "Authorization": "Bearer ${agent.api_key}",
+        "Content-Type": "application/json",
+    },
+    json={
+        "jsonrpc": "2.0",
+        "method": "filesystem/read",
+        "params": {"path": "/home/user/test.txt"},
+        "id": 1
+    }
+)
+print(response.json())` : '';
 
   if (loading) {
     return (
@@ -186,7 +216,7 @@ const MCPAgentDetail: React.FC = () => {
 
   return (
     <Box sx={{ p: 3, maxWidth: 1400, mx: 'auto' }}>
-      {/* Header with Back Button */}
+      {/* Header */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
         <IconButton onClick={() => navigate('/mcp')} size="large">
           <ArrowBackIcon />
@@ -249,8 +279,10 @@ const MCPAgentDetail: React.FC = () => {
           </Typography>
           <Chip
             size="small"
-            label={agent.is_active ? 'ACTIVE' : 'SUSPENDED'}
-            color={agent.is_active ? 'success' : 'default'}
+            icon={<LockIcon />}
+            label="API KEY PROTECTED"
+            color="primary"
+            variant="outlined"
           />
           <Typography variant="caption" color="textSecondary" sx={{ ml: 'auto' }}>
             Created: {new Date(agent.created_at).toLocaleString()}
@@ -350,8 +382,9 @@ const MCPAgentDetail: React.FC = () => {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <KeyIcon color="primary" />
             <Typography variant="h6">API Key</Typography>
+            <Chip size="small" icon={<LockIcon />} label="Bearer Auth" color="primary" variant="outlined" />
           </Box>
-          <Button size="small" startIcon={<CopyIcon />} onClick={copyApiKey}>
+          <Button size="small" startIcon={<CopyIcon />} onClick={() => copyToClipboard(agent.api_key, 'API key')}>
             Copy
           </Button>
         </Box>
@@ -374,12 +407,12 @@ const MCPAgentDetail: React.FC = () => {
         </Alert>
       </Paper>
 
-      {/* ============ TABS: Activity | Stats | Config ============ */}
+      {/* ============ TABS ============ */}
       <Paper sx={{ mb: 3 }}>
         <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)}>
           <Tab icon={<TimelineIcon />} label="Recent Activity" />
           <Tab icon={<TrendingUpIcon />} label="Statistics" />
-          <Tab icon={<SecurityIcon />} label="Configuration" />
+          <Tab icon={<CodeIcon />} label="Integration" />
         </Tabs>
       </Paper>
 
@@ -585,60 +618,135 @@ const MCPAgentDetail: React.FC = () => {
         </Grid>
       )}
 
-      {/* ============ TAB 3: CONFIGURATION ============ */}
+      {/* ============ TAB 3: INTEGRATION ============ */}
       {tabValue === 2 && (
-        <Paper sx={{ p: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            Agent Configuration
-          </Typography>
-          <Divider sx={{ mb: 2 }} />
+        <Grid container spacing={3}>
+          {/* Python Sample */}
+          <Grid size={{ xs: 12, md: 6 }}>
+            <Paper sx={{ p: 3 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                <CodeIcon color="primary" />
+                <Typography variant="h6">Python Integration</Typography>
+                <Button
+                  size="small"
+                  startIcon={<CopyIcon />}
+                  sx={{ ml: 'auto' }}
+                  onClick={() => copyToClipboard(pythonCode, 'Python code')}
+                >
+                  Copy
+                </Button>
+              </Box>
+              <Divider sx={{ mb: 2 }} />
 
-          <Grid container spacing={3}>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <Typography variant="caption" color="textSecondary">
-                Agent ID
-              </Typography>
-              <Typography variant="body2" sx={{ fontFamily: 'monospace', mb: 2 }}>
-                #{agent.id}
-              </Typography>
-            </Grid>
-
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <Typography variant="caption" color="textSecondary">
-                Name
-              </Typography>
-              <Typography variant="body2" sx={{ mb: 2 }}>
-                {agent.name}
-              </Typography>
-            </Grid>
-
-            <Grid size={{ xs: 12 }}>
-              <Typography variant="caption" color="textSecondary">
-                Description
-              </Typography>
-              <Typography variant="body2" sx={{ mb: 2 }}>
-                {agent.description || 'No description'}
-              </Typography>
-            </Grid>
-
-            <Grid size={{ xs: 12 }}>
-              <Typography variant="caption" color="textSecondary">
-                Applied Policies
-              </Typography>
-              {agent.policies.length === 0 ? (
-                <Typography variant="body2" color="textSecondary">
-                  No policies applied to this agent
-                </Typography>
-              ) : (
-                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1 }}>
-                  {agent.policies.map((policyId) => (
-                    <Chip key={policyId} label={`Policy #${policyId}`} variant="outlined" />
-                  ))}
-                </Box>
-              )}
-            </Grid>
+              <Box
+                component="pre"
+                sx={{
+                  p: 2,
+                  bgcolor: 'rgba(0,0,0,0.4)',
+                  borderRadius: 2,
+                  fontFamily: 'monospace',
+                  fontSize: '0.75rem',
+                  overflow: 'auto',
+                  maxHeight: 400,
+                  color: '#90caf9',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                }}
+              >
+                {pythonCode}
+              </Box>
+            </Paper>
           </Grid>
-        </Paper>
+
+          {/* cURL Sample */}
+          <Grid size={{ xs: 12, md: 6 }}>
+            <Paper sx={{ p: 3 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                <TerminalIcon color="primary" />
+                <Typography variant="h6">cURL Command</Typography>
+                <Button
+                  size="small"
+                  startIcon={<CopyIcon />}
+                  sx={{ ml: 'auto' }}
+                  onClick={() => copyToClipboard(curlCommand, 'cURL command')}
+                >
+                  Copy
+                </Button>
+              </Box>
+              <Divider sx={{ mb: 2 }} />
+
+              <Box
+                component="pre"
+                sx={{
+                  p: 2,
+                  bgcolor: 'rgba(0,0,0,0.4)',
+                  borderRadius: 2,
+                  fontFamily: 'monospace',
+                  fontSize: '0.75rem',
+                  overflow: 'auto',
+                  maxHeight: 400,
+                  color: '#90caf9',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                }}
+              >
+                {curlCommand}
+              </Box>
+            </Paper>
+          </Grid>
+
+          {/* Integration Notes */}
+          <Grid size={{ xs: 12 }}>
+            <Paper sx={{ p: 3, bgcolor: 'rgba(26,35,50,0.8)' }}>
+              <Typography variant="h6" gutterBottom>
+                🔒 Authentication Notes
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Grid container spacing={2}>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <Alert severity="info">
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      Required Header
+                    </Typography>
+                    <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
+                      Authorization: Bearer {agent.api_key.slice(0, 20)}...
+                    </Typography>
+                  </Alert>
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <Alert severity="warning">
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      Rate Limiting
+                    </Typography>
+                    <Typography variant="caption">
+                      Default: 100 requests per minute per agent
+                    </Typography>
+                  </Alert>
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <Alert severity="success">
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      Policies Applied
+                    </Typography>
+                    <Typography variant="caption">
+                      {agent.policies.length} policies enforced on all requests
+                    </Typography>
+                  </Alert>
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <Alert severity="error">
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      Suspension
+                    </Typography>
+                    <Typography variant="caption">
+                      Use "Suspend" to immediately block all requests
+                    </Typography>
+                  </Alert>
+                </Grid>
+              </Grid>
+            </Paper>
+          </Grid>
+        </Grid>
       )}
 
       {/* Snackbar */}
