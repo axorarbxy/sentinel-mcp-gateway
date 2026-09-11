@@ -66,6 +66,7 @@ request_log = []
 blocked_requests = []
 anomaly_alerts = []
 
+
 # ============ MCP PROXY ENDPOINT ============
 @app.post("/mcp/proxy")
 async def mcp_proxy(request: Request):
@@ -73,20 +74,22 @@ async def mcp_proxy(request: Request):
     Main MCP proxy endpoint - evaluates requests with policies + ML anomaly detection
     Note: Using /mcp/proxy to avoid conflict with /mcp/agents etc.
     """
+    from database import SessionLocal, MCPAgent
+
     body = await request.body()
-    
+
     try:
         data = json.loads(body)
     except:
         data = {"raw": body.decode()}
-    
+
     method = data.get("method", "unknown")
     params = data.get("params", {})
     agent_id = data.get("agent_id", "default-agent")
-    
+
     # 1. Policy evaluation (rule-based)
     policy_result = policy_engine.evaluate(method, params)
-    
+
     # 2. Request analysis (rule-based anomaly detection)
     request_data = {
         "timestamp": datetime.now().isoformat(),
@@ -95,10 +98,10 @@ async def mcp_proxy(request: Request):
         "agent_id": agent_id
     }
     analysis_result = request_analyzer.analyze(agent_id, request_data)
-    
+
     # 3. Behavioral monitoring (ML-based anomaly detection)
     is_ml_anomaly, ml_alert = behavioral_monitor.add_request(agent_id, request_data)
-    
+
     # Log the request
     log_entry = {
         "timestamp": datetime.now().isoformat(),
@@ -113,17 +116,17 @@ async def mcp_proxy(request: Request):
         "ml_anomaly": is_ml_anomaly
     }
     request_log.append(log_entry)
-    
+
     # Determine if request should be blocked
     should_block = False
     block_reasons = []
-    
+
     # Check policy
     if not policy_result.allowed:
         should_block = True
         block_reasons.append(f"Policy: {policy_result.reason}")
         blocked_requests.append(log_entry)
-    
+
     # Check rule-based analysis
     if analysis_result["anomaly"]:
         should_block = True
@@ -137,7 +140,7 @@ async def mcp_proxy(request: Request):
             "severity": analysis_result["severity"],
             "request": request_data
         })
-    
+
     # Check ML-based anomaly
     if is_ml_anomaly:
         should_block = True
@@ -152,13 +155,37 @@ async def mcp_proxy(request: Request):
                 "score": ml_alert.get("score"),
                 "request": request_data
             })
-    
+
+    # ============ UPDATE AGENT COUNTERS IN DATABASE ============
+    try:
+        db = SessionLocal()
+        # Find agent by name (matches AGENT_ID from test script)
+        agent = db.query(MCPAgent).filter(MCPAgent.name == agent_id).first()
+        if not agent:
+            # Fallback: use first agent
+            agent = db.query(MCPAgent).first()
+
+        if agent:
+            agent.total_requests = (agent.total_requests or 0) + 1
+            if should_block:
+                agent.blocked_requests = (agent.blocked_requests or 0) + 1
+            agent.last_seen = datetime.utcnow()
+            db.commit()
+            logger.info(f"📊 Updated counters for agent '{agent.name}': total={agent.total_requests}, blocked={agent.blocked_requests}")
+    except Exception as e:
+        logger.error(f"Failed to update agent counters: {e}")
+    finally:
+        try:
+            db.close()
+        except:
+            pass
+
     # Log decision
     if should_block:
         logger.warning(f"❌ BLOCKED: {method} - {'; '.join(block_reasons)}")
     else:
         logger.info(f"✅ ALLOWED: {method} - {policy_result.reason}")
-    
+
     # Return response
     if should_block:
         return {
@@ -174,7 +201,7 @@ async def mcp_proxy(request: Request):
                 }
             }
         }
-    
+
     return {
         "jsonrpc": "2.0",
         "id": data.get("id"),
@@ -192,18 +219,18 @@ async def mcp_proxy(request: Request):
 async def cybereye_analyze(request: Request):
     body = await request.body()
     data = json.loads(body)
-    
+
     input_type = data.get("type", "")
     input_data = data.get("data", "")
-    
+
     if not input_type or not input_data:
         return {
             "error": "Missing type or data",
             "available_types": ["url", "file", "network", "user", "android", "password", "qr"]
         }
-    
+
     results = cybereye.analyze(input_type, input_data)
-    
+
     return {
         "input_type": input_type,
         "results": results,
@@ -284,12 +311,12 @@ async def get_anomalies(limit: int = 50):
 async def get_stats():
     total = len(request_log)
     blocked = len(blocked_requests)
-    
+
     method_counts = {}
     for log in request_log:
         method = log.get("method", "unknown")
         method_counts[method] = method_counts.get(method, 0) + 1
-    
+
     return {
         "total_requests": total,
         "blocked": blocked,
