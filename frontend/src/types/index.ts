@@ -1,5 +1,6 @@
 // types/index.ts
 export interface LogEntry {
+  event_id?: string;
   timestamp: string;
   agent_id: string;
   method: string;
@@ -10,6 +11,7 @@ export interface LogEntry {
   analysis_anomaly: boolean;
   analysis_reason: string;
   ml_anomaly: boolean;
+  event_category?: 'security' | 'system';
 }
 
 export interface StatsResponse {
@@ -17,6 +19,7 @@ export interface StatsResponse {
   blocked: number;
   block_rate: number;
   anomaly_alerts: number;
+  system_events?: number;
   ml_models: number;
   methods: Record<string, number>;
   monitor_stats: {
@@ -37,11 +40,13 @@ export interface HealthResponse {
 }
 
 export interface Alert {
+  event_id?: string;
   timestamp: string;
   agent_id: string;
   type: 'rule_based' | 'ml_based';
   reason: string;
   severity: 'LOW' | 'MEDIUM' | 'HIGH';
+  score?: number | null;
   request: {
     timestamp: string;
     method: string;

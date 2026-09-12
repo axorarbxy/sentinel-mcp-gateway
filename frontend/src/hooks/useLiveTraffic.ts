@@ -65,6 +65,7 @@ export const useLiveTraffic = (
   const reconnectAttemptsRef = useRef(0);
   const isMountedRef = useRef(true);
   const onEventRef = useRef(onEvent);
+  const manualCloseRef = useRef(false);
 
   // Keep onEvent ref updated (avoid reconnect on handler change)
   useEffect(() => {
@@ -145,6 +146,13 @@ export const useLiveTraffic = (
         console.log('[Sentinel WS] Disconnected');
         setConnected(false);
 
+        // Skip auto-reconnect if this close was triggered manually
+        // (e.g. via reconnect()), which schedules its own reconnect.
+        if (manualCloseRef.current) {
+          manualCloseRef.current = false;
+          return;
+        }
+
         // Auto-reconnect with exponential backoff
         if (enabled && reconnectAttemptsRef.current < 10) {
           const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
@@ -186,6 +194,7 @@ export const useLiveTraffic = (
 
   const reconnect = useCallback(() => {
     if (wsRef.current) {
+      manualCloseRef.current = true;
       wsRef.current.close();
     }
     reconnectAttemptsRef.current = 0;

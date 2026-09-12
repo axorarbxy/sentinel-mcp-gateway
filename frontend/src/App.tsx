@@ -231,6 +231,12 @@ function App() {
   useEffect(() => {
     const token = localStorage.getItem('access_token');
     setIsAuthenticated(!!token);
+
+    // Fired by services/api.ts logout() — either a manual logout or
+    // an automatic one triggered by a 401 response from the backend.
+    const handleLogout = () => setIsAuthenticated(false);
+    window.addEventListener('auth:logout', handleLogout);
+    return () => window.removeEventListener('auth:logout', handleLogout);
   }, []);
 
   // If not authenticated

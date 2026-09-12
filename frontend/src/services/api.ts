@@ -24,6 +24,26 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
+// Clears stored auth tokens and notifies the app to update its
+// authenticated state (App.tsx listens for this event).
+export const logout = () => {
+  localStorage.removeItem('access_token');
+  localStorage.removeItem('refresh_token');
+  window.dispatchEvent(new Event('auth:logout'));
+};
+
+// If the backend ever rejects our token (expired/revoked), log out
+// automatically instead of leaving the UI stuck in a broken state.
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      logout();
+    }
+    return Promise.reject(error);
+  }
+);
+
 export const gatewayApi = {
   getHealth: async (): Promise<HealthResponse> => {
     const response = await api.get('/health');

@@ -11,6 +11,7 @@ import asyncio
 import uvicorn
 import json
 import logging
+import uuid
 from datetime import datetime
 
 # Import components
@@ -68,6 +69,7 @@ cybereye = ModuleManager()
 request_log = []
 blocked_requests = []
 anomaly_alerts = []
+system_events = []
 
 
 # ============ WEBSOCKET MANAGER ============
@@ -239,6 +241,13 @@ async def mcp_proxy(request: Request):
 
     # 1. Policy evaluation (rule-based)
     policy_result = policy_engine.evaluate(method, params)
+    # Malformed MCP calls are operational/protocol failures.  They are still
+    # denied, but are not automatically security threats or ML alerts.
+    is_protocol_error = any(
+        detail["rule"] == "ACL" and detail["reason"] == "Missing tool name in request"
+        for detail in policy_result.details
+    )
+    event_category = "system" if is_protocol_error else "security"
 
     # 2. Request analysis (rule-based anomaly detection)
     request_data = {
@@ -254,6 +263,7 @@ async def mcp_proxy(request: Request):
 
     # Log the request
     log_entry = {
+        "event_id": f"evt_{uuid.uuid4().hex}",
         "timestamp": datetime.now().isoformat(),
         "agent_id": agent_id,
         "method": method,
@@ -263,7 +273,8 @@ async def mcp_proxy(request: Request):
         "policy_reason": policy_result.reason,
         "analysis_anomaly": analysis_result["anomaly"],
         "analysis_reason": analysis_result["reason"],
-        "ml_anomaly": is_ml_anomaly
+        "ml_anomaly": is_ml_anomaly,
+        "event_category": event_category,
     }
     request_log.append(log_entry)
 
@@ -275,35 +286,47 @@ async def mcp_proxy(request: Request):
     if not policy_result.allowed:
         should_block = True
         block_reasons.append(f"Policy: {policy_result.reason}")
-        blocked_requests.append(log_entry)
 
     # Check rule-based analysis
     if analysis_result["anomaly"]:
         should_block = True
         block_reasons.append(f"Rule-based: {analysis_result['reason']}")
-        blocked_requests.append(log_entry)
-        anomaly_alerts.append({
-            "timestamp": datetime.now().isoformat(),
-            "agent_id": agent_id,
-            "type": "rule_based",
-            "reason": analysis_result["reason"],
-            "severity": analysis_result["severity"],
-            "request": request_data
-        })
+        if not is_protocol_error:
+            anomaly_alerts.append({
+                "event_id": log_entry["event_id"],
+                "timestamp": datetime.now().isoformat(),
+                "agent_id": agent_id,
+                "type": "rule_based",
+                "reason": analysis_result["reason"],
+                "severity": analysis_result["severity"],
+                "request": request_data
+            })
 
     # Check ML-based anomaly
     if is_ml_anomaly:
         should_block = True
         block_reasons.append(f"ML-based: Behavioral anomaly detected")
-        blocked_requests.append(log_entry)
-        if ml_alert:
+        if ml_alert and not is_protocol_error:
             anomaly_alerts.append({
+                "event_id": log_entry["event_id"],
                 "timestamp": datetime.now().isoformat(),
                 "agent_id": agent_id,
                 "type": "ml_based",
                 "reason": "Behavioral pattern deviation",
+                "severity": "MEDIUM",
                 "score": ml_alert.get("score"),
                 "request": request_data
+            })
+
+    # A request may violate multiple controls, but it is only one blocked
+    # request.  Appending here prevents impossible block rates above 100%.
+    if should_block:
+        blocked_requests.append(log_entry)
+        if is_protocol_error:
+            system_events.append({
+                **log_entry,
+                "system_code": "MCP-VAL-001",
+                "system_reason": "Missing required MCP tool name",
             })
 
     # ============ UPDATE AGENT COUNTERS IN DATABASE ============
@@ -342,11 +365,14 @@ async def mcp_proxy(request: Request):
                 "method": method,
                 "params": params,
                 "allowed": not should_block,
+                "event_id": log_entry["event_id"],
+                "event_category": event_category,
                 "reason": policy_result.reason if not should_block else "; ".join(block_reasons),
                 "ml_anomaly": is_ml_anomaly,
                 "total_requests": len(request_log),
                 "total_blocked": len(blocked_requests),
                 "total_anomalies": len(anomaly_alerts),
+                "total_system_events": len(system_events),
             },
             "timestamp": datetime.now().isoformat(),
         }
@@ -399,6 +425,7 @@ async def websocket_traffic(websocket: WebSocket):
                 "total_requests": len(request_log),
                 "total_blocked": len(blocked_requests),
                 "total_anomalies": len(anomaly_alerts),
+                "total_system_events": len(system_events),
                 "recent_logs": request_log[-10:],
             },
             "timestamp": datetime.now().isoformat(),
@@ -518,6 +545,15 @@ async def get_anomalies(limit: int = 50):
     }
 
 
+@app.get("/logs/system")
+async def get_system_events(limit: int = 50):
+    """Operational and protocol events, kept separate from threats."""
+    return {
+        "total": len(system_events),
+        "events": system_events[-limit:]
+    }
+
+
 @app.get("/stats")
 async def get_stats():
     total = len(request_log)
@@ -533,6 +569,7 @@ async def get_stats():
         "blocked": blocked,
         "block_rate": round((blocked / total * 100) if total > 0 else 0, 2),
         "anomaly_alerts": len(anomaly_alerts),
+        "system_events": len(system_events),
         "ml_models": len(behavioral_monitor.models),
         "methods": method_counts,
         "monitor_stats": behavioral_monitor.get_stats()
