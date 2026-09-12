@@ -3,18 +3,54 @@ MCP Management API Routes
 Handles agents, servers, and policies CRUD
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Security
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from datetime import datetime
 import secrets
 import json
+import os
+import time
 
 from database import get_db, MCPAgent, MCPServer, MCPPolicy
+from auth_routes import require_scopes
 
 
-router = APIRouter(prefix="/mcp", tags=["mcp-management"])
+router = APIRouter(
+    prefix="/mcp",
+    tags=["mcp-management"],
+    dependencies=[Security(require_scopes, scopes=["gateway:admin"])],
+)
+
+
+class CircuitBreaker:
+    """Fail fast while an upstream MCP server is unavailable."""
+
+    def __init__(self, failure_threshold: int = 3, reset_seconds: int = 30):
+        self.failure_threshold = failure_threshold
+        self.reset_seconds = reset_seconds
+        self.states = {}
+
+    def allow_request(self, key: int) -> bool:
+        state = self.states.get(key)
+        if not state or state["failures"] < self.failure_threshold:
+            return True
+        return time.monotonic() - state["last_failure"] >= self.reset_seconds
+
+    def record_success(self, key: int):
+        self.states.pop(key, None)
+
+    def record_failure(self, key: int):
+        state = self.states.setdefault(key, {"failures": 0, "last_failure": 0.0})
+        state["failures"] += 1
+        state["last_failure"] = time.monotonic()
+
+
+server_circuit_breaker = CircuitBreaker(
+    failure_threshold=max(1, int(os.getenv("SENTINEL_CIRCUIT_BREAKER_FAILURES", "3"))),
+    reset_seconds=max(1, int(os.getenv("SENTINEL_CIRCUIT_BREAKER_RESET_SECONDS", "30"))),
+)
 
 
 # ============ PYDANTIC MODELS ============
@@ -290,14 +326,27 @@ async def check_server_health(server_id: int, db: Session = Depends(get_db)):
     server = db.query(MCPServer).filter(MCPServer.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
+
+    if not server_circuit_breaker.allow_request(server.id):
+        server.health_status = "circuit_open"
+        db.commit()
+        raise HTTPException(
+            status_code=503,
+            detail="Upstream health checks are temporarily paused after repeated failures",
+        )
     
     import httpx
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(f"{server.url}/health")
             server.health_status = "online" if response.status_code == 200 else "offline"
+            if response.status_code == 200:
+                server_circuit_breaker.record_success(server.id)
+            else:
+                server_circuit_breaker.record_failure(server.id)
     except Exception:
         server.health_status = "offline"
+        server_circuit_breaker.record_failure(server.id)
     
     server.last_health_check = datetime.utcnow()
     db.commit()

@@ -70,10 +70,33 @@ export const gatewayApi = {
     return response.data;
   },
 
+  updateAlertStatus: async (alertId: string, status: Alert['status']): Promise<Alert> => {
+    const response = await api.patch(`/logs/anomalies/${alertId}/status?status=${encodeURIComponent(status)}`);
+    return response.data;
+  },
+
   getAgentStats: async (agentId: string): Promise<AgentStats> => {
     const response = await api.get(`/agent/${agentId}`);
     return response.data;
   },
+
+  getAgentsSummary: async (): Promise<{ total_agents: number; agents: AgentSecuritySummary[] }> => {
+    const response = await api.get('/agents/summary');
+    return response.data;
+  },
 };
+
+export interface AgentSecuritySummary {
+  agent_id: string;
+  requests: number;
+  blocked: number;
+  anomalies: number;
+  tools: Record<string, number>;
+  last_seen: string | null;
+  risk_score: number;
+  trust_level: 'TRUSTED' | 'MONITORED' | 'RESTRICTED' | 'QUARANTINED';
+  behavior_status: 'NORMAL' | 'ANOMALOUS';
+  recent_events: LogEntry[];
+}
 
 export default api;

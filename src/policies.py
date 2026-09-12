@@ -106,6 +106,14 @@ DEFAULT_ACL = {
     "write_file": {"allow_read": False, "allow_write": True},
     "shell_exec": {"allow": False},   # blocked by default
     "list_dir": {"allow": True},
+    # Legacy gateway clients send the tool as the JSON-RPC method rather than
+    # as params.name. Support that form without classifying it as malformed.
+    "filesystem/read": {"allow": True},
+    "filesystem/write": {"allow": True},
+    "filesystem/delete": {"allow": False},
+    "shell/execute": {"allow": True},
+    "db/query": {"allow": True},
+    "network/request": {"allow": True},
 }
 
 
@@ -115,6 +123,8 @@ def check_acl(payload: Dict[str, Any], acl: Optional[Dict] = None) -> PolicyResu
     """
     acl = acl or DEFAULT_ACL
     tool = payload.get("params", {}).get("name")
+    if not tool and payload.get("method") != "tools/call":
+        tool = payload.get("method")
     if not tool:
         return PolicyResult(
             allowed=False,
@@ -160,7 +170,37 @@ def evaluate(payload: Dict[str, Any], acl: Optional[Dict] = None) -> List[Policy
     return [
         check_acl(payload, acl),
         check_path_traversal(payload),
+        check_shell_command(payload),
+        check_sql_query(payload),
     ]
+
+
+def _arguments(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Use MCP arguments, or the legacy method parameters when present."""
+    params = payload.get("params", {}) or {}
+    return params.get("arguments", params.get("args", params)) or {}
+
+
+def check_shell_command(payload: Dict[str, Any]) -> PolicyResult:
+    """Allow a deliberately small command set for legacy shell requests."""
+    if payload.get("method") != "shell/execute":
+        return PolicyResult(True, "SHELL_COMMAND", "Not a shell command")
+    command = str(_arguments(payload).get("command", "")).strip()
+    allowed_commands = {"ls", "pwd", "echo", "whoami", "date", "uptime", "ps", "cat"}
+    command_name = command.split(maxsplit=1)[0] if command else ""
+    if command_name not in allowed_commands:
+        return PolicyResult(False, "SHELL_COMMAND", f"Command '{command_name or 'empty'}' is not allow-listed", "critical")
+    return PolicyResult(True, "SHELL_COMMAND", "Command permitted by allow-list")
+
+
+def check_sql_query(payload: Dict[str, Any]) -> PolicyResult:
+    """Allow read-only legacy database queries and block destructive SQL."""
+    if payload.get("method") != "db/query":
+        return PolicyResult(True, "SQL_SAFETY", "Not a database query")
+    query = str(_arguments(payload).get("sql", "")).strip()
+    if not query.upper().startswith("SELECT"):
+        return PolicyResult(False, "SQL_SAFETY", "Only read-only SELECT queries are permitted", "high")
+    return PolicyResult(True, "SQL_SAFETY", "Read-only query permitted")
 
 
 class PolicyEngine:
@@ -177,7 +217,7 @@ class PolicyEngine:
         spelling are checked rather than silently bypassing path validation.
         """
         request_params = params or {}
-        arguments = request_params.get("arguments", request_params.get("args", {}))
+        arguments = request_params.get("arguments", request_params.get("args", request_params))
         payload = {
             "method": method,
             "params": {

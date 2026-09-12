@@ -40,13 +40,24 @@ export interface HealthResponse {
 }
 
 export interface Alert {
-  event_id?: string;
+  id: string;
+  event_ids: string[];
   timestamp: string;
   agent_id: string;
   type: 'rule_based' | 'ml_based';
+  title: string;
+  category: string;
   reason: string;
   severity: 'LOW' | 'MEDIUM' | 'HIGH';
   score?: number | null;
+  first_seen: string;
+  last_seen: string;
+  occurrence_count: number;
+  status: 'NEW' | 'ACKNOWLEDGED' | 'INVESTIGATING' | 'CONTAINED' | 'RESOLVED' | 'FALSE_POSITIVE';
+  decision: string;
+  rule_id: string;
+  risk: { score: number; rule_score: number; anomaly_score?: number | null };
+  evidence: { rule: string; method: string; explanation: string; latest_request: Record<string, any> };
   request: {
     timestamp: string;
     method: string;

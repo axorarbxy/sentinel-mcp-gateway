@@ -397,7 +397,7 @@ class URLScanResponse(BaseModel):
 
 
 def setup_ml_routes(app: FastAPI):
-    @app.post("/ml/scan/qr")
+    @app.post("/ml/scan/qr", tags=["ML Security"])
     async def scan_qr(request: ScanRequest) -> ScanResponse:
         try:
             image_data = request.image
@@ -432,7 +432,7 @@ def setup_ml_routes(app: FastAPI):
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     
-    @app.get("/ml/health")
+    @app.get("/ml/health", tags=["ML Security"])
     async def ml_health():
         return {
             "status": "healthy" if (MODELS_LOADED or PHISHING_MODELS_LOADED) else "error",
@@ -441,7 +441,7 @@ def setup_ml_routes(app: FastAPI):
             "message": "ML scanner ready"
         }
     
-    @app.post("/ml/analyze/url")
+    @app.post("/ml/analyze/url", tags=["ML Security"])
     async def analyze_url_endpoint(request: URLScanRequest) -> URLScanResponse:
         try:
             result = analyze_url(request.url, model_type='phishing')

@@ -2,8 +2,8 @@
 Authentication Routes
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Security
+from fastapi.security import OAuth2PasswordBearer, SecurityScopes
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from typing import Optional
@@ -67,7 +67,26 @@ class APIKeyCreate(BaseModel):
     expires_days: Optional[int] = Field(30, ge=1, le=365)
 
 # OAuth2
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+OAUTH_SCOPES = {
+    "gateway:read": "Read gateway telemetry and configuration.",
+    "gateway:write": "Create or change gateway configuration.",
+    "gateway:admin": "Manage MCP agents, servers, and policies.",
+}
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", scopes=OAUTH_SCOPES)
+
+
+async def require_scopes(
+    security_scopes: SecurityScopes,
+    token: str = Depends(oauth2_scheme),
+):
+    """Validate JWT scopes for management routes and Swagger authorization."""
+    payload = decode_token(token)
+    if not payload or payload.get("type") != "access":
+        raise HTTPException(status_code=401, detail="Invalid or expired access token")
+    granted = set(payload.get("scopes", []))
+    if not set(security_scopes.scopes).issubset(granted):
+        raise HTTPException(status_code=403, detail="Insufficient OAuth scope")
+    return payload
 
 # Routes
 @router.post("/register", response_model=UserResponse)
@@ -139,7 +158,8 @@ async def login(
     token_data = {
         "sub": str(user.id),
         "username": user.username,
-        "is_admin": user.is_admin
+        "is_admin": user.is_admin,
+        "scopes": ["gateway:read", "gateway:write", "gateway:admin"] if user.is_admin else ["gateway:read"],
     }
     access_token = create_access_token(token_data)
     refresh_token = create_refresh_token(token_data)
@@ -179,7 +199,8 @@ async def refresh_token(refresh_token: str, db: Session = Depends(get_db)):
     token_data = {
         "sub": str(user.id),
         "username": user.username,
-        "is_admin": user.is_admin
+        "is_admin": user.is_admin,
+        "scopes": ["gateway:read", "gateway:write", "gateway:admin"] if user.is_admin else ["gateway:read"],
     }
     access_token = create_access_token(token_data)
     new_refresh_token = create_refresh_token(token_data)
