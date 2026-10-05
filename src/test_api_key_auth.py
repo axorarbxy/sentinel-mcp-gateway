@@ -1,7 +1,7 @@
 import json
 import secrets
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -243,7 +243,7 @@ def test_rotation_grace_period_and_immediate_invalidation(gateway_client):
 
     db = session_factory()
     agent = db.query(MCPAgent).filter(MCPAgent.id == agent_id).first()
-    agent.previous_credential_expires_at = datetime.utcnow() - timedelta(seconds=1)
+    agent.previous_credential_expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=1)
     db.commit()
     db.close()
     assert client.post("/mcp/proxy", headers={"Authorization": f"Bearer {old_key}"}, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).status_code == 401

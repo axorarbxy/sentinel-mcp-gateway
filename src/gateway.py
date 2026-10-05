@@ -21,6 +21,7 @@ import time
 import threading
 from collections import defaultdict, deque
 from datetime import datetime, timezone
+from time_utils import utcnow
 
 # Import components
 from policies import PolicyEngine, PolicyAction
@@ -307,7 +308,7 @@ def create_or_update_alert(
     stream. Matching agent, detection, tool and reason within five minutes are
     intentionally shown as one alert with an occurrence count.
     """
-    now = datetime.utcnow()
+    now = utcnow()
     method = request_data.get("method", "unknown")
     fingerprint = f"{agent_id}|{alert_type}|{method}|{reason}"
     for alert in reversed(anomaly_alerts):
@@ -443,7 +444,7 @@ def _append_auth_event(
 ) -> dict:
     event = {
         "type": "agent_authentication",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow().isoformat(),
         "category": category,
         "source_ip": source_ip,
         "key_prefix": key_prefix,
@@ -475,7 +476,7 @@ def _persist_auth_event(
             "key_prefix": key_prefix,
             "reason": category,
         }),
-        timestamp=datetime.utcnow(),
+        timestamp=utcnow(),
     ))
 
 
@@ -574,7 +575,7 @@ def verify_agent_api_key(api_key: str, source_ip: str):
         if agent is not None and matched:
             if previous_key and (
                 agent.previous_credential_expires_at is None
-                or agent.previous_credential_expires_at <= datetime.utcnow()
+                or agent.previous_credential_expires_at <= utcnow()
             ):
                 category = "revoked"
             elif agent.status == "suspended":
@@ -604,7 +605,7 @@ def verify_agent_api_key(api_key: str, source_ip: str):
                 should_update_seen = now - last_seen_write_at.get(agent.id, 0.0) >= 60
                 should_audit_success = now - last_success_audit_at.get(agent.id, 0.0) >= 60
                 if should_update_seen:
-                    agent.last_seen = datetime.utcnow()
+                    agent.last_seen = utcnow()
                     last_seen_write_at[agent.id] = now
                 if should_audit_success:
                     _persist_auth_event(
@@ -1018,7 +1019,7 @@ async def update_alert_status(alert_id: str, status: str):
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
     alert["status"] = normalized_status
-    alert["updated_at"] = datetime.utcnow().isoformat()
+    alert["updated_at"] = utcnow().isoformat()
     return alert
 
 

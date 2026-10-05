@@ -7,7 +7,8 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from typing import Optional
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
+from ..time_utils import utcnow
 import re
 
 from ..database import get_db, User, AuditLog, APIKey
@@ -25,21 +26,23 @@ class UserCreate(BaseModel):
     password: str = Field(..., min_length=8)
     full_name: Optional[str] = None
     
-    @validator('username')
-    def validate_username(cls, v):
-        if not re.match(r'^[a-zA-Z0-9_]+$', v):
+    @field_validator('username')
+    @classmethod
+    def validate_username(cls, value: str) -> str:
+        if not re.match(r'^[a-zA-Z0-9_]+$', value):
             raise ValueError('Username must contain only letters, numbers, and underscores')
-        return v
-    
-    @validator('password')
-    def validate_password(cls, v):
-        if not re.search(r'[A-Z]', v):
+        return value
+
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        if not re.search(r'[A-Z]', value):
             raise ValueError('Password must contain at least one uppercase letter')
-        if not re.search(r'[a-z]', v):
+        if not re.search(r'[a-z]', value):
             raise ValueError('Password must contain at least one lowercase letter')
-        if not re.search(r'\d', v):
+        if not re.search(r'\d', value):
             raise ValueError('Password must contain at least one number')
-        return v
+        return value
 
 class UserLogin(BaseModel):
     username_or_email: str
@@ -131,7 +134,7 @@ async def login(
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
     # Update last login
-    user.last_login = datetime.utcnow()
+    user.last_login = utcnow()
     db.commit()
     
     # Create tokens
@@ -254,7 +257,7 @@ async def create_api_key(
         user_id=user.id,
         key=api_key,
         name=key_data.name,
-        expires_at=datetime.utcnow() + timedelta(days=key_data.expires_days)
+        expires_at=utcnow() + timedelta(days=key_data.expires_days)
     )
     db.add(db_key)
     db.commit()

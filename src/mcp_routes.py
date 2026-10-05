@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 import json
 import os
 import time
+from time_utils import utcnow
 
 from database import get_db, MCPAgent, MCPServer, MCPPolicy, AuditLog
 from auth import create_agent_api_key, hash_api_key, decode_token
@@ -81,7 +82,7 @@ def _emit_agent_audit(db: Session, *, actor_id: Optional[int], agent_id: Optiona
             "result": result,
             "details": details or {},
         }, default=str),
-        timestamp=datetime.utcnow(),
+        timestamp=utcnow(),
     ))
     db.commit()
 
@@ -318,7 +319,7 @@ async def update_agent(agent_id: int, updates: AgentUpdate, request: Request, db
         agent.allowed_tools = json.dumps(_parse_tools(updates.allowed_tools))
     if updates.metadata is not None:
         agent.agent_metadata = json.dumps(updates.metadata or {})
-    agent.updated_at = datetime.utcnow()
+    agent.updated_at = utcnow()
     db.commit(); db.refresh(agent)
     actor_id = None
     auth = request.headers.get("Authorization", "")
@@ -335,7 +336,7 @@ async def delete_agent(agent_id: int, request: Request, db: Session = Depends(ge
     agent = db.query(MCPAgent).filter(MCPAgent.id == agent_id, MCPAgent.deleted_at.is_(None)).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    agent.deleted_at = datetime.utcnow(); agent.is_active = False; agent.status = "revoked"
+    agent.deleted_at = utcnow(); agent.is_active = False; agent.status = "revoked"
     db.commit()
     actor_id = None
     auth = request.headers.get("Authorization", "")
@@ -352,7 +353,7 @@ async def suspend_agent(agent_id: int, request: Request, db: Session = Depends(g
     agent = db.query(MCPAgent).filter(MCPAgent.id == agent_id, MCPAgent.deleted_at.is_(None)).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    agent.status = "suspended"; agent.is_active = False; agent.updated_at = datetime.utcnow()
+    agent.status = "suspended"; agent.is_active = False; agent.updated_at = utcnow()
     db.commit(); db.refresh(agent)
     actor_id = None
     auth = request.headers.get("Authorization", "")
@@ -371,7 +372,7 @@ async def resume_agent(agent_id: int, request: Request, db: Session = Depends(ge
         raise HTTPException(status_code=404, detail="Agent not found")
     if agent.status == "revoked":
         raise HTTPException(status_code=409, detail="Revoked agents cannot be resumed")
-    agent.status = "active"; agent.is_active = True; agent.updated_at = datetime.utcnow()
+    agent.status = "active"; agent.is_active = True; agent.updated_at = utcnow()
     db.commit(); db.refresh(agent)
     actor_id = None
     auth = request.headers.get("Authorization", "")
@@ -388,7 +389,8 @@ async def revoke_agent(agent_id: int, request: Request, db: Session = Depends(ge
     agent = db.query(MCPAgent).filter(MCPAgent.id == agent_id, MCPAgent.deleted_at.is_(None)).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    agent.status = "revoked"; agent.is_active = False; agent.updated_at = datetime.utcnow(); agent.deleted_at = datetime.utcnow()
+    revoked_at = utcnow()
+    agent.status = "revoked"; agent.is_active = False; agent.updated_at = revoked_at; agent.deleted_at = revoked_at
     db.commit(); db.refresh(agent)
     actor_id = None
     auth = request.headers.get("Authorization", "")
@@ -419,7 +421,7 @@ async def rotate_agent_credential(
     if grace_period_seconds and old_id:
         agent.previous_credential_hash = old_hash
         agent.previous_credential_id = old_id
-        agent.previous_credential_expires_at = datetime.utcnow() + timedelta(seconds=grace_period_seconds)
+        agent.previous_credential_expires_at = utcnow() + timedelta(seconds=grace_period_seconds)
     else:
         agent.previous_credential_hash = None
         agent.previous_credential_id = None
@@ -427,7 +429,7 @@ async def rotate_agent_credential(
     agent.credential_hash = hash_api_key(new_key)
     agent.credential_id = new_id
     agent.credential_prefix = new_prefix
-    agent.updated_at = datetime.utcnow()
+    agent.updated_at = utcnow()
     if agent.status != "active":
         agent.status = "active"
         agent.is_active = True
@@ -530,7 +532,7 @@ async def check_server_health(server_id: int, db: Session = Depends(get_db)):
         server.health_status = "offline"
         server_circuit_breaker.record_failure(server.id)
 
-    server.last_health_check = datetime.utcnow()
+    server.last_health_check = utcnow()
     db.commit()
     return {"status": server.health_status, "last_check": server.last_health_check}
 

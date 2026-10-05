@@ -173,14 +173,44 @@ const Register: React.FC = () => {
           navigate('/login');
         }, 2000);
       } else {
-        if (data.detail?.includes('username')) {
-          setFieldErrors({ ...fieldErrors, username: 'Username already taken' });
-          setError('Username is already registered');
-        } else if (data.detail?.includes('email')) {
-          setFieldErrors({ ...fieldErrors, email: 'Email already registered' });
-          setError('Email is already registered. Log in instead?');
+        const detail: unknown = data.detail;
+        const issues = Array.isArray(detail)
+          ? detail.filter(
+              (issue): issue is { loc?: unknown; msg: string } =>
+                typeof issue === 'object' &&
+                issue !== null &&
+                'msg' in issue &&
+                typeof issue.msg === 'string',
+            )
+          : [];
+        const serverMessage = typeof detail === 'string' ? detail : issues[0]?.msg;
+        const normalizedServerMessage = serverMessage?.toLowerCase() ?? '';
+        const issueLocation = issues[0]?.loc;
+        const fieldName = Array.isArray(issueLocation)
+          ? issueLocation.find((part): part is string =>
+              part === 'username' || part === 'email',
+            )
+          : undefined;
+
+        if (typeof detail === 'string' && normalizedServerMessage.includes('username')) {
+          const isDuplicate = normalizedServerMessage.includes('already');
+          setFieldErrors((current) => ({
+            ...current,
+            username: isDuplicate ? 'Username already taken' : serverMessage,
+          }));
+          setError(isDuplicate ? 'Username is already registered' : serverMessage);
+        } else if (typeof detail === 'string' && normalizedServerMessage.includes('email')) {
+          const isDuplicate = normalizedServerMessage.includes('already');
+          setFieldErrors((current) => ({
+            ...current,
+            email: isDuplicate ? 'Email already registered' : serverMessage,
+          }));
+          setError(isDuplicate ? 'Email is already registered. Log in instead?' : serverMessage);
         } else {
-          setError(data.detail || 'Registration failed. Please try again.');
+          if (fieldName) {
+            setFieldErrors((current) => ({ ...current, [fieldName]: serverMessage || 'Invalid value' }));
+          }
+          setError(serverMessage || 'Registration failed. Please try again.');
         }
         setActiveStep(0);
       }

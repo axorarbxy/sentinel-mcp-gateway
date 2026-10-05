@@ -3,11 +3,15 @@ Database Models and Configuration
 """
 
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Float, Text, ForeignKey, UniqueConstraint
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 import hashlib
 import os
+
+try:
+    from .time_utils import utcnow
+except ImportError:
+    from time_utils import utcnow
 import re
 
 # Database setup - Using SQLite for development
@@ -139,7 +143,7 @@ class User(Base):
     full_name = Column(String(100))
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     last_login = Column(DateTime)
     
     # Relationships
@@ -156,7 +160,7 @@ class AuditLog(Base):
     details = Column(Text)
     ip_address = Column(String(45))
     user_agent = Column(String(255))
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=utcnow)
     
     user = relationship("User", back_populates="audit_logs")
 
@@ -168,7 +172,7 @@ class MCPRequestEvent(Base):
     id = Column(Integer, primary_key=True, index=True)
     event_id = Column(String(40), unique=True, nullable=False, index=True)
     schema_version = Column(String(16), nullable=False, default="1.0")
-    timestamp = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    timestamp = Column(DateTime, nullable=False, default=utcnow, index=True)
     session_id = Column(String(255), nullable=True, index=True)
     request_id = Column(String(255), nullable=True, index=True)
     agent_id = Column(Integer, nullable=False, index=True)
@@ -199,7 +203,7 @@ class APIKey(Base):
     key = Column(String(255), unique=True, index=True, nullable=False)
     name = Column(String(100))
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     expires_at = Column(DateTime)
     last_used = Column(DateTime)
     
@@ -219,7 +223,7 @@ class ThreatReport(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     reporter_note = Column(Text, nullable=True)
     status = Column(String(50), default="pending")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     
     user = relationship("User")
 
@@ -236,7 +240,7 @@ class DetectionFeedback(Base):
     actual_verdict = Column(String(50))
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     note = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     
     user = relationship("User")
 
@@ -252,7 +256,7 @@ class ScanHistory(Base):
     confidence = Column(Float)
     source = Column(String(50))
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 # ============ NEW: MCP MANAGEMENT TABLES ============
@@ -284,8 +288,8 @@ class MCPAgent(Base):
     total_requests = Column(Integer, default=0)
     blocked_requests = Column(Integer, default=0)
     agent_metadata = Column("metadata", Text, default="{}")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
     last_seen = Column(DateTime, nullable=True)
     deleted_at = Column(DateTime, nullable=True)
     
@@ -306,7 +310,7 @@ class MCPServer(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     last_health_check = Column(DateTime, nullable=True)
     health_status = Column(String(20), default="unknown")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     
     user = relationship("User")
 
@@ -323,7 +327,7 @@ class MCPPolicy(Base):
     severity = Column(String(20), default="medium")
     is_enabled = Column(Boolean, default=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     
     user = relationship("User")
 

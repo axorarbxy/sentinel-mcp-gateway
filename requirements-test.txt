@@ -1,0 +1,2 @@
+# Starlette 1.7 prefers httpx2 in its TestClient integration.
+httpx2==2.13.1

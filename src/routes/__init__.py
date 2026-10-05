@@ -1,1 +1,1 @@
-ÿş
+"""Route package."""
