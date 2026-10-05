@@ -15,16 +15,20 @@ import uvicorn
 import json
 import logging
 import uuid
+import secrets
 import os
 import time
+import threading
 from collections import defaultdict, deque
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Import components
 from policies import PolicyEngine, PolicyAction
 from monitor import BehavioralMonitor, RequestAnalyzer
 from modules.module_manager import ModuleManager
 from gateway_plugins import GatewayPluginManager
+from auth import decode_token, hash_api_key, parse_agent_api_key, verify_api_key
+import mcp_interception
 
 # Import auth routes
 from auth_routes import router as auth_router
@@ -62,6 +66,11 @@ app = FastAPI(
 Use this API to register MCP agents, enforce policy checks on tool calls, and
 inspect security, system, and behavioral-monitoring telemetry.
 
+The authenticated `POST /mcp/proxy` endpoint validates and forwards MCP
+Streamable HTTP JSON-RPC traffic to `SENTINEL_MCP_UPSTREAM_URL`. Tool calls are
+checked against each agent's `allowed_tools`; redacted interception events are
+available through the operator-protected `GET /mcp/events` endpoint.
+
 ### Authenticating MCP proxy requests
 
 Create an MCP agent, then send its API key as
@@ -82,13 +91,26 @@ signals are reported as security detections.
 if os.getenv("SENTINEL_FORCE_HTTPS", "false").lower() == "true":
     app.add_middleware(HTTPSRedirectMiddleware)
 
-allowed_hosts = [host.strip() for host in os.getenv("SENTINEL_ALLOWED_HOSTS", "*").split(",") if host.strip()]
+allowed_hosts = [
+    host.strip()
+    for host in os.getenv("SENTINEL_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+    if host.strip()
+]
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
 RATE_LIMIT_REQUESTS = max(1, int(os.getenv("SENTINEL_RATE_LIMIT_REQUESTS", "60")))
 RATE_LIMIT_WINDOW_SECONDS = max(1, int(os.getenv("SENTINEL_RATE_LIMIT_WINDOW_SECONDS", "60")))
-rate_limit_buckets: DefaultDict[str, deque[float]] = defaultdict(deque)
-rate_limit_lock = asyncio.Lock()
+AUTH_FAILURE_LIMIT = max(1, int(os.getenv("SENTINEL_AUTH_FAILURE_LIMIT", "10")))
+AUTH_FAILURE_WINDOW_SECONDS = max(1, int(os.getenv("SENTINEL_AUTH_FAILURE_WINDOW_SECONDS", "60")))
+AGENT_RATE_LIMIT_REQUESTS = max(1, int(os.getenv("SENTINEL_AGENT_RATE_LIMIT_REQUESTS", str(RATE_LIMIT_REQUESTS))))
+rate_limit_buckets: DefaultDict[tuple[str, str], deque[float]] = defaultdict(deque)
+rate_limit_lock = threading.Lock()
+last_seen_write_at: dict[int, float] = {}
+last_success_audit_at: dict[int, float] = {}
+websocket_tickets: dict[str, tuple[float, int]] = {}
+auth_state_lock = threading.Lock()
+MAX_AUTH_BUCKETS = 20000
+DUMMY_API_KEY_HASH = hash_api_key("cye_dummy_auth_key_for_timing_equalization")
 gateway_metrics = {
     "started_at": time.time(),
     "requests": 0,
@@ -99,33 +121,95 @@ gateway_metrics = {
 }
 
 
+def _prune_auth_state(now: float) -> None:
+    expired = [
+        key for key, bucket in rate_limit_buckets.items()
+        if not bucket or now - bucket[-1] >= max(AUTH_FAILURE_WINDOW_SECONDS, RATE_LIMIT_WINDOW_SECONDS)
+    ]
+    for key in expired:
+        rate_limit_buckets.pop(key, None)
+    if len(rate_limit_buckets) > MAX_AUTH_BUCKETS:
+        for key in list(rate_limit_buckets)[:len(rate_limit_buckets) - MAX_AUTH_BUCKETS]:
+            rate_limit_buckets.pop(key, None)
+
+
+def _allow_limited_request(
+    keys: list[tuple[str, str]],
+    limit: int,
+    window_seconds: int,
+) -> bool:
+    now = time.monotonic()
+    with rate_limit_lock:
+        _prune_auth_state(now)
+        for key in keys:
+            bucket = rate_limit_buckets[key]
+            while bucket and now - bucket[0] >= window_seconds:
+                bucket.popleft()
+            if len(bucket) >= limit:
+                return False
+        for key in keys:
+            rate_limit_buckets[key].append(now)
+        return True
+
+
+def _is_rate_limited(
+    keys: list[tuple[str, str]],
+    limit: int,
+    window_seconds: int,
+) -> bool:
+    now = time.monotonic()
+    with rate_limit_lock:
+        _prune_auth_state(now)
+        for key in keys:
+            bucket = rate_limit_buckets[key]
+            while bucket and now - bucket[0] >= window_seconds:
+                bucket.popleft()
+            if len(bucket) >= limit:
+                return True
+        return False
+
+
+def _record_failed_auth_attempt(keys: list[tuple[str, str]]) -> None:
+    now = time.monotonic()
+    with rate_limit_lock:
+        _prune_auth_state(now)
+        for key in keys:
+            rate_limit_buckets[key].append(now)
+
+
 @app.middleware("http")
 async def gateway_security_and_metrics(request: Request, call_next):
-    """Add traceability, proxy-safe headers, proxy rate limits, and telemetry."""
+    """Enforce operator authentication by default and add request telemetry."""
     request_id = request.headers.get("X-Request-ID", f"req_{uuid.uuid4().hex}")
     started = time.perf_counter()
 
-    if request.url.path == "/mcp/proxy":
-        key = request.headers.get("Authorization") or (request.client.host if request.client else "anonymous")
-        now = time.monotonic()
-        async with rate_limit_lock:
-            bucket = rate_limit_buckets[key]
-            while bucket and now - bucket[0] >= RATE_LIMIT_WINDOW_SECONDS:
-                bucket.popleft()
-            if len(bucket) >= RATE_LIMIT_REQUESTS:
-                gateway_metrics["rate_limited"] += 1
-                gateway_metrics["requests"] += 1
-                gateway_metrics["status_codes"]["429"] += 1
-                return JSONResponse(
-                    status_code=429,
-                    content={"detail": "Rate limit exceeded", "request_id": request_id},
-                    headers={
-                        "Retry-After": str(RATE_LIMIT_WINDOW_SECONDS),
-                        "X-Request-ID": request_id,
-                        "X-Content-Type-Options": "nosniff",
-                    },
-                )
-            bucket.append(now)
+    public_paths = {
+        "/health", "/docs", "/redoc", "/openapi.json",
+        "/auth/register", "/auth/login", "/auth/refresh",
+    }
+    if (
+        request.method != "OPTIONS"
+        and request.url.path not in public_paths
+        and request.url.path != "/mcp/proxy"
+    ):
+        authorization = request.headers.getlist("authorization")
+        token = authorization[0][7:].strip() if len(authorization) == 1 and authorization[0].startswith("Bearer ") else ""
+        payload = decode_token(token) if token else None
+        if not payload or payload.get("type") != "access":
+            response = JSONResponse(
+                status_code=401,
+                content={"detail": "Operator access token required"},
+            )
+            response.headers["X-Request-ID"] = request_id
+            return response
+        if "gateway:read" not in set(payload.get("scopes", [])):
+            response = JSONResponse(
+                status_code=403,
+                content={"detail": "Insufficient OAuth scope"},
+            )
+            response.headers["X-Request-ID"] = request_id
+            return response
+        request.state.operator_identity = payload
 
     try:
         response = await call_next(request)
@@ -164,7 +248,7 @@ def custom_openapi():
     schema.setdefault("components", {}).setdefault("securitySchemes", {})["MCPAgentKey"] = {
         "type": "http",
         "scheme": "bearer",
-        "bearerFormat": "sk_sentinel API key",
+        "bearerFormat": "cye_ agent API key",
         "description": "Use the API key generated when registering an MCP agent.",
     }
     app.openapi_schema = schema
@@ -173,14 +257,18 @@ def custom_openapi():
 
 app.openapi = custom_openapi
 
-# Enable CORS for frontend
+# Enable CORS only for configured dashboard origins; bearer auth does not use cookies.
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv("SENTINEL_CORS_ORIGINS", "http://localhost:3000").split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_origin_regex=r"chrome-extension://.*",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=cors_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 
 # ============ INCLUDE AUTH ROUTES ============
@@ -206,6 +294,7 @@ request_log = []
 blocked_requests = []
 anomaly_alerts = []
 system_events = []
+authentication_events = deque(maxlen=1000)
 
 
 def create_or_update_alert(
@@ -328,313 +417,443 @@ class TrafficBroadcaster:
 traffic_broadcaster = TrafficBroadcaster()
 
 
-# ============ AUTH HELPER ============
-def verify_agent_api_key(api_key: str):
-    """
-    Verify API key against registered MCP agents
-    Returns: (agent_object, error_message)
-    """
-    from database import SessionLocal, MCPAgent
+@app.post("/auth/ws-ticket", tags=["authentication"])
+async def create_websocket_ticket(request: Request):
+    """Issue a short-lived, one-use ticket for browsers that cannot set WS headers."""
+    operator = getattr(request.state, "operator_identity", None)
+    if not operator:
+        raise HTTPException(status_code=401, detail="Operator access token required")
+    ticket = secrets.token_urlsafe(32)
+    now = time.monotonic()
+    with auth_state_lock:
+        expired = [value for value, (expires_at, _) in websocket_tickets.items() if expires_at <= now]
+        for value in expired:
+            websocket_tickets.pop(value, None)
+        websocket_tickets[ticket] = (now + 30, int(operator["sub"]))
+    return {"ticket": ticket, "expires_in": 30}
 
-    if not api_key:
-        return None, "Missing API key"
 
+# ============ AUTH HELPERS ============
+def _append_auth_event(
+    *,
+    category: str,
+    source_ip: str,
+    key_prefix: str | None = None,
+    agent_id: int | None = None,
+) -> dict:
+    event = {
+        "type": "agent_authentication",
+        "timestamp": datetime.utcnow().isoformat(),
+        "category": category,
+        "source_ip": source_ip,
+        "key_prefix": key_prefix,
+        "agent_id": agent_id,
+    }
+    authentication_events.append(event)
+    if len(system_events) >= 1000:
+        del system_events[0]
+    system_events.append(event)
+    return event
+
+
+def _persist_auth_event(
+    db,
+    *,
+    category: str,
+    source_ip: str,
+    key_prefix: str | None = None,
+    agent_id: int | None = None,
+) -> None:
+    from database import AuditLog
+
+    db.add(AuditLog(
+        user_id=None,
+        action=f"agent_auth_{category}",
+        details=json.dumps({
+            "target_agent_id": agent_id,
+            "source_ip": source_ip,
+            "key_prefix": key_prefix,
+            "reason": category,
+        }),
+        timestamp=datetime.utcnow(),
+    ))
+
+
+def verify_agent_api_key(api_key: str, source_ip: str):
+    """Resolve a presented agent key through an indexed ID and enforce lifecycle state."""
+    from database import MCPAgent, SessionLocal
+    from sqlalchemy import or_
+
+    parsed = parse_agent_api_key(api_key)
+    is_legacy = api_key.startswith("sk_sentinel_") and len(api_key) <= 256
+    lookup_id = parsed[0] if parsed else None
+    key_prefix = f"cye_{api_key.split('_', 2)[1]}_{lookup_id}" if lookup_id else (
+        "sk_sentinel_" if is_legacy else None
+    )
+    limiter_keys = [("ip", source_ip)]
+    if lookup_id:
+        limiter_keys.append(("key", key_prefix))
+    if _is_rate_limited(
+        limiter_keys,
+        AUTH_FAILURE_LIMIT,
+        AUTH_FAILURE_WINDOW_SECONDS,
+    ):
+        from database import SessionLocal
+
+        audit_db = None
+        try:
+            audit_db = SessionLocal()
+            _persist_auth_event(
+                audit_db,
+                category="rate_limited",
+                source_ip=source_ip,
+                key_prefix=key_prefix,
+            )
+            audit_db.commit()
+        except Exception:
+            if audit_db is not None:
+                audit_db.rollback()
+            logger.exception("Failed to persist agent authentication lockout event")
+        finally:
+            if audit_db is not None:
+                audit_db.close()
+        _append_auth_event(
+            category="rate_limited",
+            source_ip=source_ip,
+            key_prefix=key_prefix,
+        )
+        return None, "rate_limited", None, key_prefix
+
+    if parsed is None and not is_legacy:
+        _record_failed_auth_attempt(limiter_keys)
+        _append_auth_event(
+            category="malformed",
+            source_ip=source_ip,
+            key_prefix=key_prefix,
+        )
+        return None, "malformed", None, key_prefix
+
+    db = None
     try:
         db = SessionLocal()
-        agent = db.query(MCPAgent).filter(MCPAgent.api_key == api_key).first()
+        agent = None
+        matched = False
+        if lookup_id:
+            agent = db.query(MCPAgent).filter(
+                or_(
+                    MCPAgent.credential_id == lookup_id,
+                    MCPAgent.previous_credential_id == lookup_id,
+                )
+            ).first()
+            expected_hash = DUMMY_API_KEY_HASH
+            previous_key = False
+            if agent:
+                if agent.credential_id == lookup_id:
+                    expected_hash = agent.credential_hash or DUMMY_API_KEY_HASH
+                elif agent.previous_credential_id == lookup_id:
+                    expected_hash = agent.previous_credential_hash or DUMMY_API_KEY_HASH
+                    previous_key = True
+            matched = verify_api_key(api_key, expected_hash)
+        else:
+            # Compatibility for pre-lookup-ID credentials; new keys never use this path.
+            legacy_agents = db.query(MCPAgent).filter(
+                MCPAgent.credential_prefix == "sk_sentinel_"
+            ).all()
+            matched = False
+            for candidate in legacy_agents:
+                current_match = verify_api_key(api_key, candidate.credential_hash or DUMMY_API_KEY_HASH)
+                previous_match = verify_api_key(api_key, candidate.previous_credential_hash or DUMMY_API_KEY_HASH)
+                if current_match or previous_match:
+                    agent = candidate
+                    matched = True
+                    break
+            previous_key = bool(agent and agent.previous_credential_hash and
+                                verify_api_key(api_key, agent.previous_credential_hash))
 
-        if not agent:
-            db.close()
-            return None, "Invalid API key"
+        category = "unknown"
+        if agent is not None and matched:
+            if previous_key and (
+                agent.previous_credential_expires_at is None
+                or agent.previous_credential_expires_at <= datetime.utcnow()
+            ):
+                category = "revoked"
+            elif agent.status == "suspended":
+                category = "suspended"
+            elif agent.status == "revoked" or agent.deleted_at is not None or not agent.is_active:
+                category = "revoked"
+            elif agent.status not in (None, "active"):
+                category = "revoked"
+            else:
+                allowed_tools = []
+                try:
+                    parsed_tools = json.loads(agent.allowed_tools or "[]")
+                    allowed_tools = parsed_tools if isinstance(parsed_tools, list) else []
+                except (TypeError, ValueError):
+                    allowed_tools = []
+                identity = {
+                    "id": agent.id,
+                    "agent_id": agent.id,
+                    "name": agent.name,
+                    "environment": agent.environment or "dev",
+                    "team": agent.team,
+                    "status": agent.status or "active",
+                    "allowed_tools": allowed_tools,
+                    "risk_level": agent.risk_level or "low",
+                }
+                now = time.monotonic()
+                should_update_seen = now - last_seen_write_at.get(agent.id, 0.0) >= 60
+                should_audit_success = now - last_success_audit_at.get(agent.id, 0.0) >= 60
+                if should_update_seen:
+                    agent.last_seen = datetime.utcnow()
+                    last_seen_write_at[agent.id] = now
+                if should_audit_success:
+                    _persist_auth_event(
+                        db,
+                        category="success",
+                        source_ip=source_ip,
+                        key_prefix=key_prefix,
+                        agent_id=agent.id,
+                    )
+                    last_success_audit_at[agent.id] = now
+                if should_update_seen or should_audit_success:
+                    db.commit()
+                if should_audit_success:
+                    _append_auth_event(
+                        category="success",
+                        source_ip=source_ip,
+                        key_prefix=key_prefix,
+                        agent_id=agent.id,
+                    )
+                db.close()
+                return identity, None, None, key_prefix
 
-        if not agent.is_active:
-            db.close()
-            return None, "Agent is suspended"
-
-        # Return agent info (detach from session)
-        agent_info = {
-            "id": agent.id,
-            "name": agent.name,
-            "api_key": agent.api_key,
-            "is_active": agent.is_active,
-        }
+        _persist_auth_event(
+            db,
+            category=category,
+            source_ip=source_ip,
+            key_prefix=key_prefix,
+            agent_id=agent.id if agent is not None and matched else None,
+        )
+        db.commit()
+        _append_auth_event(
+            category=category,
+            source_ip=source_ip,
+            key_prefix=key_prefix,
+            agent_id=agent.id if agent is not None and matched else None,
+        )
+        _record_failed_auth_attempt(limiter_keys)
         db.close()
-        return agent_info, None
-
-    except Exception as e:
-        logger.error(f"API key verification error: {e}")
-        return None, f"Authentication error: {str(e)}"
+        return None, category, None, key_prefix
+    except Exception:
+        logger.exception("Agent credential store unavailable during verification")
+        if db is not None:
+            db.rollback()
+            db.close()
+        return None, "store_unavailable", None, key_prefix
 
 
 # ============ MCP PROXY ENDPOINT (AUTHENTICATED) ============
 @app.post(
     "/mcp/proxy",
     tags=["MCP Proxy"],
-    summary="Validate and enforce an MCP tool call",
-    openapi_extra={
-        "security": [{"MCPAgentKey": []}],
-        "requestBody": {"required": True, "content": {"application/json": {"example": {
-            "jsonrpc": "2.0", "id": "req_001", "method": "tools/call",
-            "params": {"name": "read_file", "arguments": {"path": "README.md"}},
-        }}}},
-    },
+    summary="Intercept and forward authenticated MCP Streamable HTTP messages",
+    openapi_extra={"security": [{"MCPAgentKey": []}]},
 )
 async def mcp_proxy(request: Request):
-    """
-    Main MCP proxy endpoint - REQUIRES API KEY AUTHENTICATION
-    Header: Authorization: Bearer sk_sentinel_xxxxx
-    """
-    from database import SessionLocal, MCPAgent
-
-    # ============ STEP 1: AUTHENTICATION ============
-    auth_header = request.headers.get("Authorization", "")
-
-    if not auth_header:
-        logger.warning("🚫 Request rejected: Missing Authorization header")
-        return JSONResponse(
-            status_code=401,
-            content={
-                "jsonrpc": "2.0",
-                "error": {
-                    "code": -32001,
-                    "message": "Unauthorized",
-                    "data": {
-                        "reason": "Missing Authorization header",
-                        "hint": "Add header: Authorization: Bearer sk_sentinel_xxxxx"
-                    }
-                }
-            }
-        )
-
-    # Check Bearer format
-    if not auth_header.startswith("Bearer "):
-        logger.warning("🚫 Request rejected: Invalid Authorization format")
-        return JSONResponse(
-            status_code=401,
-            content={
-                "jsonrpc": "2.0",
-                "error": {
-                    "code": -32001,
-                    "message": "Unauthorized",
-                    "data": {
-                        "reason": "Invalid Authorization format",
-                        "hint": "Expected: Bearer sk_sentinel_xxxxx"
-                    }
-                }
-            }
-        )
-
-    api_key = auth_header.replace("Bearer ", "").strip()
-
-    # Verify against database
-    agent_info, error = verify_agent_api_key(api_key)
-
-    if error:
-        logger.warning(f"🚫 Request rejected: {error}")
-        return JSONResponse(
-            status_code=401,
-            content={
-                "jsonrpc": "2.0",
-                "error": {
-                    "code": -32001,
-                    "message": "Unauthorized",
-                    "data": {
-                        "reason": error
-                    }
-                }
-            }
-        )
-
-    # Authenticated ✅
-    logger.info(f"✅ Authenticated: Agent '{agent_info['name']}' (ID: {agent_info['id']})")
-
-    # ============ STEP 2: PROCESS REQUEST ============
-    body = await request.body()
-
-    try:
-        data = json.loads(body)
-    except:
-        data = {"raw": body.decode()}
-
-    method = data.get("method", "unknown")
-    params = data.get("params", {})
-    # Use agent name from DB (not from request body)
-    agent_id = agent_info["name"]
-    await gateway_plugins.emit("mcp.request_received", {
-        "request_id": request.headers.get("X-Request-ID"),
-        "agent_id": agent_id,
-        "method": method,
-    })
-
-    # 1. Policy evaluation (rule-based)
-    policy_result = policy_engine.evaluate(method, params)
-    # Malformed MCP calls are operational/protocol failures.  They are still
-    # denied, but are not automatically security threats or ML alerts.
-    is_protocol_error = any(
-        detail["rule"] == "ACL" and detail["reason"] == "Missing tool name in request"
-        for detail in policy_result.details
+    """Authenticate the agent, then validate, decide, record, and proxy JSON-RPC."""
+    auth_headers = request.headers.getlist("authorization")
+    auth_header = auth_headers[0] if len(auth_headers) == 1 else ""
+    source_ip = request.client.host if request.client else "unknown"
+    has_key_query = any(
+        name.lower() in {"api_key", "apikey", "authorization", "credential", "key", "token"}
+        for name, _ in request.query_params.multi_items()
     )
-    event_category = "system" if is_protocol_error else "security"
+    malformed = (
+        has_key_query
+        or len(auth_headers) != 1
+        or len(auth_header.encode("utf-8")) > 512
+        or not auth_header.startswith("Bearer ")
+        or not auth_header[7:].strip()
+        or len(auth_header[7:].strip()) > 256
+        or "," in auth_header[7:]
+        or request.headers.get("x-api-key") is not None
+    )
+    if malformed:
+        allowed = _allow_limited_request(
+            [("ip", source_ip)], AUTH_FAILURE_LIMIT, AUTH_FAILURE_WINDOW_SECONDS,
+        )
+        category = "malformed" if allowed else "rate_limited"
+        event = _append_auth_event(category=category, source_ip=source_ip)
+        logger.warning("Agent authentication failed category=%s source_ip=%s", category, source_ip)
+        await traffic_broadcaster.broadcast({"type": "authentication_event", "data": dict(event)})
+        status_code = 401 if allowed else 429
+        return JSONResponse(
+            status_code=status_code,
+            content={"jsonrpc": "2.0", "error": {
+                "code": -32001,
+                "message": "Unauthorized" if allowed else "Authentication rate limit exceeded",
+            }},
+            headers={"Retry-After": str(AUTH_FAILURE_WINDOW_SECONDS)} if not allowed else None,
+        )
 
-    # 2. Request analysis (rule-based anomaly detection)
-    request_data = {
-        "timestamp": datetime.now().isoformat(),
-        "method": method,
-        "params": params,
-        "agent_id": agent_id
-    }
-    analysis_result = request_analyzer.analyze(agent_id, request_data)
-
-    # 3. Behavioral monitoring (ML-based anomaly detection)
-    is_ml_anomaly, ml_alert = behavioral_monitor.add_request(agent_id, request_data)
-
-    # Log the request
-    log_entry = {
-        "event_id": f"evt_{uuid.uuid4().hex}",
-        "timestamp": datetime.now().isoformat(),
-        "agent_id": agent_id,
-        "method": method,
-        "params": params,
-        "id": data.get("id"),
-        "policy_allowed": policy_result.allowed,
-        "policy_reason": policy_result.reason,
-        "analysis_anomaly": analysis_result["anomaly"],
-        "analysis_reason": analysis_result["reason"],
-        "ml_anomaly": is_ml_anomaly,
-        "event_category": event_category,
-    }
-    request_log.append(log_entry)
-
-    # Determine if request should be blocked
-    should_block = False
-    block_reasons = []
-
-    # Check policy
-    if not policy_result.allowed:
-        should_block = True
-        block_reasons.append(f"Policy: {policy_result.reason}")
-
-    # Check rule-based analysis
-    if analysis_result["anomaly"]:
-        should_block = True
-        block_reasons.append(f"Rule-based: {analysis_result['reason']}")
-        if not is_protocol_error:
-            create_or_update_alert(
-                agent_id=agent_id, alert_type="rule_based",
-                reason=analysis_result["reason"], severity=analysis_result["severity"],
-                request_data=request_data, event_id=log_entry["event_id"],
-            )
-
-    # Check ML-based anomaly
-    if is_ml_anomaly:
-        should_block = True
-        block_reasons.append(f"ML-based: Behavioral anomaly detected")
-        if ml_alert and not is_protocol_error:
-            create_or_update_alert(
-                agent_id=agent_id, alert_type="ml_based",
-                reason="Behavioral pattern deviation", severity="MEDIUM",
-                request_data=request_data, event_id=log_entry["event_id"],
-                score=ml_alert.get("score"),
-            )
-
-    # A request may violate multiple controls, but it is only one blocked
-    # request.  Appending here prevents impossible block rates above 100%.
-    if should_block:
-        blocked_requests.append(log_entry)
-        if is_protocol_error:
-            system_events.append({
-                **log_entry,
-                "system_code": "MCP-VAL-001",
-                "system_reason": "Missing required MCP tool name",
+    api_key = auth_header[7:].strip()
+    agent_info, error, _, key_prefix = verify_agent_api_key(api_key, source_ip)
+    if error:
+        logger.warning(
+            "Agent authentication failed category=%s source_ip=%s key_prefix=%s",
+            error, source_ip, key_prefix,
+        )
+        status_code, message = {
+            "store_unavailable": (503, "Authentication service unavailable"),
+            "suspended": (403, "Agent is not permitted"),
+            "rate_limited": (429, "Authentication rate limit exceeded"),
+        }.get(error, (401, "Unauthorized"))
+        if authentication_events:
+            await traffic_broadcaster.broadcast({
+                "type": "authentication_event",
+                "data": dict(authentication_events[-1]),
             })
+        return JSONResponse(
+            status_code=status_code,
+            content={"jsonrpc": "2.0", "error": {"code": -32001, "message": message}},
+            headers={"Retry-After": str(AUTH_FAILURE_WINDOW_SECONDS)} if status_code == 429 else None,
+        )
 
-    await gateway_plugins.emit("mcp.decision", {
-        "event_id": log_entry["event_id"],
-        "agent_id": agent_id,
-        "method": method,
-        "allowed": not should_block,
-        "category": event_category,
-        "reasons": block_reasons,
-    })
+    if not _allow_limited_request(
+        [("agent", str(agent_info["agent_id"]))],
+        AGENT_RATE_LIMIT_REQUESTS,
+        RATE_LIMIT_WINDOW_SECONDS,
+    ):
+        from database import SessionLocal
 
-    # ============ UPDATE AGENT COUNTERS IN DATABASE ============
-    try:
-        db = SessionLocal()
-        agent = db.query(MCPAgent).filter(MCPAgent.id == agent_info["id"]).first()
-
-        if agent:
-            agent.total_requests = (agent.total_requests or 0) + 1
-            if should_block:
-                agent.blocked_requests = (agent.blocked_requests or 0) + 1
-            agent.last_seen = datetime.utcnow()
-            db.commit()
-            logger.info(f"📊 Updated counters for agent '{agent.name}': total={agent.total_requests}, blocked={agent.blocked_requests}")
-    except Exception as e:
-        logger.error(f"Failed to update agent counters: {e}")
-    finally:
+        event = _append_auth_event(
+            category="rate_limited",
+            source_ip=source_ip,
+            key_prefix=key_prefix,
+            agent_id=agent_info["agent_id"],
+        )
+        audit_db = None
         try:
-            db.close()
-        except:
-            pass
+            audit_db = SessionLocal()
+            _persist_auth_event(
+                audit_db,
+                category="rate_limited",
+                source_ip=source_ip,
+                key_prefix=key_prefix,
+                agent_id=agent_info["agent_id"],
+            )
+            audit_db.commit()
+        except Exception:
+            if audit_db is not None:
+                audit_db.rollback()
+            logger.error("Failed to persist agent traffic limit event")
+        finally:
+            if audit_db is not None:
+                audit_db.close()
+        await traffic_broadcaster.broadcast({"type": "authentication_event", "data": dict(event)})
+        return JSONResponse(
+            status_code=429,
+            content={"jsonrpc": "2.0", "error": {"code": -32002, "message": "Agent rate limit exceeded"}},
+            headers={"Retry-After": str(RATE_LIMIT_WINDOW_SECONDS)},
+        )
 
-    # Log decision
-    if should_block:
-        logger.warning(f"❌ BLOCKED: {method} - {'; '.join(block_reasons)}")
-    else:
-        logger.info(f"✅ ALLOWED: {method} - {policy_result.reason}")
+    request.state.agent_identity = agent_info
+    logger.info("Authenticated agent id=%s key_prefix=%s", agent_info["agent_id"], key_prefix)
 
-    # ============ BROADCAST TO WEBSOCKET CLIENTS ============
-    try:
-        event = {
-            "type": "new_request",
+    async def emit_interception_event(event: dict) -> None:
+        safe_event = {
+            "type": "mcp_event",
             "data": {
-                "timestamp": log_entry["timestamp"],
-                "agent_id": agent_id,
-                "method": method,
-                "params": params,
-                "allowed": not should_block,
-                "event_id": log_entry["event_id"],
-                "event_category": event_category,
-                "reason": policy_result.reason if not should_block else "; ".join(block_reasons),
-                "ml_anomaly": is_ml_anomaly,
-                "total_requests": len(request_log),
-                "total_blocked": len(blocked_requests),
-                "total_anomalies": len(anomaly_alerts),
-                "total_system_events": len(system_events),
+                key: event.get(key) for key in (
+                    "schema_version", "event_id", "timestamp", "session_id", "request_id",
+                    "agent_id", "agent_name", "environment", "direction", "method",
+                    "upstream_server", "tool_name", "arguments", "resource_uri", "prompt_name",
+                    "decision", "decision_reason", "matched_rule_ids", "latency_ms",
+                    "response_status", "response_size_bytes", "source_ip", "payload_hash", "payload",
+                )
             },
-            "timestamp": datetime.now().isoformat(),
         }
-        await traffic_broadcaster.broadcast(event)
-    except Exception as e:
-        logger.error(f"Broadcast error: {e}")
+        request_log.append({
+            "event_id": event["event_id"],
+            "timestamp": event["timestamp"],
+            "agent_id": agent_info["name"],
+            "method": event["method"],
+            "params": event.get("payload", {}),
+            "policy_allowed": event["decision"] != "block",
+            "policy_reason": event["decision_reason"],
+            "event_category": "security" if event["decision"] == "block" else "system",
+        })
+        await traffic_broadcaster.broadcast(safe_event)
 
-    # Return response
-    if should_block:
-        return {
-            "jsonrpc": "2.0",
-            "id": data.get("id"),
-            "error": {
-                "code": -32000,
-                "message": "Security violation",
-                "data": {
-                    "reasons": block_reasons,
-                    "policy_details": policy_result.details,
-                    "analysis_details": analysis_result
-                }
+    return await mcp_interception.intercept_request(request, agent_info, emit_interception_event)
+
+
+@app.get("/mcp/events", tags=["MCP Proxy"], summary="Query redacted MCP interception events")
+async def list_mcp_events(
+    agent_id: int | None = None,
+    decision: str | None = None,
+    method: str | None = None,
+    tool_name: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    limit: int = 100,
+):
+    from database import MCPRequestEvent, SessionLocal
+
+    if decision is not None and decision not in {"allow", "block", "flag"}:
+        raise HTTPException(status_code=422, detail="decision must be allow, block, or flag")
+    if since is not None and until is not None and since > until:
+        raise HTTPException(status_code=422, detail="since must not be later than until")
+    db = SessionLocal()
+    try:
+        query = db.query(MCPRequestEvent)
+        if agent_id is not None:
+            query = query.filter(MCPRequestEvent.agent_id == agent_id)
+        if decision is not None:
+            query = query.filter(MCPRequestEvent.decision == decision)
+        if method is not None:
+            query = query.filter(MCPRequestEvent.method == method)
+        if tool_name is not None:
+            query = query.filter(MCPRequestEvent.tool_name == tool_name)
+        if since is not None:
+            since_utc = since.astimezone(timezone.utc).replace(tzinfo=None) if since.tzinfo else since
+            query = query.filter(MCPRequestEvent.timestamp >= since_utc)
+        if until is not None:
+            until_utc = until.astimezone(timezone.utc).replace(tzinfo=None) if until.tzinfo else until
+            query = query.filter(MCPRequestEvent.timestamp <= until_utc)
+        events = query.order_by(MCPRequestEvent.timestamp.desc(), MCPRequestEvent.id.desc()).limit(
+            max(1, min(limit, 500))
+        ).all()
+        return {"events": [
+            {
+                "schema_version": event.schema_version,
+                "event_id": event.event_id,
+                "timestamp": event.timestamp.isoformat() + "Z",
+                "session_id": event.session_id,
+                "request_id": event.request_id,
+                "agent_id": event.agent_id,
+                "agent_name": event.agent_name,
+                "environment": event.environment,
+                "direction": event.direction,
+                "method": event.method,
+                "upstream_server": event.upstream_server,
+                "tool_name": event.tool_name,
+                "resource_uri": event.resource_uri,
+                "prompt_name": event.prompt_name,
+                "decision": event.decision,
+                "decision_reason": event.decision_reason,
+                "matched_rule_ids": json.loads(event.matched_rule_ids),
+                "latency_ms": event.latency_ms,
+                "response_status": event.response_status,
+                "response_size_bytes": event.response_size_bytes,
+                "source_ip": event.source_ip,
+                "payload_hash": event.payload_hash,
+                "payload": json.loads(event.payload_json),
             }
-        }
-
-    return {
-        "jsonrpc": "2.0",
-        "id": data.get("id"),
-        "result": {
-            "status": "allowed",
-            "message": "Request allowed by Sentinel-MCP",
-            "policy_reason": policy_result.reason,
-            "analysis": analysis_result
-        }
-    }
-
+            for event in events
+        ]}
+    finally:
+        db.close()
 
 # ============ WEBSOCKET: LIVE TRAFFIC ============
 @app.websocket("/mcp/ws/traffic")
@@ -643,7 +862,23 @@ async def websocket_traffic(websocket: WebSocket):
     WebSocket endpoint for real-time MCP traffic updates
     Pushes new events as they happen
     """
-    await traffic_broadcaster.connect(websocket)
+    offered_protocols = websocket.scope.get("subprotocols", [])
+    ticket_protocol = next(
+        (value for value in offered_protocols if value.startswith("cybereye-ticket.")),
+        None,
+    )
+    ticket = ticket_protocol.removeprefix("cybereye-ticket.") if ticket_protocol else ""
+    now = time.monotonic()
+    with auth_state_lock:
+        ticket_data = websocket_tickets.pop(ticket, None) if ticket else None
+    if not ticket_data or ticket_data[0] <= now:
+        await websocket.close(code=4401, reason="Operator authentication required")
+        return
+
+    await websocket.accept(subprotocol="cybereye.v1")
+    async with traffic_broadcaster.lock:
+        traffic_broadcaster.active_connections.add(websocket)
+    logger.info("Authenticated operator connected to live traffic feed")
 
     try:
         # Send initial snapshot on connect

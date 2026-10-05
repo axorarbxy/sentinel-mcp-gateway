@@ -41,6 +41,7 @@ interface UseLiveTrafficReturn {
 }
 
 const WS_URL = 'ws://localhost:8001/mcp/ws/traffic';
+const API_URL = 'http://localhost:8001';
 
 export const useLiveTraffic = (
   options: UseLiveTrafficOptions = {}
@@ -66,19 +67,33 @@ export const useLiveTraffic = (
   const isMountedRef = useRef(true);
   const onEventRef = useRef(onEvent);
   const manualCloseRef = useRef(false);
+  const connectInProgressRef = useRef(false);
 
   // Keep onEvent ref updated (avoid reconnect on handler change)
   useEffect(() => {
     onEventRef.current = onEvent;
   }, [onEvent]);
 
-  const connect = useCallback(() => {
+  const connect = useCallback(async () => {
     if (!enabled) return;
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) return;
+    if (connectInProgressRef.current) return;
+    const operatorToken = localStorage.getItem('access_token');
+    if (!operatorToken) return;
 
     try {
+      connectInProgressRef.current = true;
       console.log('[Sentinel WS] Connecting to', url);
-      const ws = new WebSocket(url);
+      const ticketResponse = await fetch(`${API_URL}/auth/ws-ticket`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${operatorToken}` },
+      });
+      if (!ticketResponse.ok) {
+        throw new Error(`Unable to authorize live traffic feed (${ticketResponse.status})`);
+      }
+      const { ticket } = await ticketResponse.json();
+      if (!isMountedRef.current) return;
+      const ws = new WebSocket(url, ['cybereye.v1', `cybereye-ticket.${ticket}`]);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -166,6 +181,8 @@ export const useLiveTraffic = (
       };
     } catch (error) {
       console.error('[Sentinel WS] Connection failed:', error);
+    } finally {
+      connectInProgressRef.current = false;
     }
   }, [url, enabled, maxEvents]);
 

@@ -60,12 +60,18 @@ interface MCPAgent {
   name: string;
   description: string | null;
   api_key: string;
+  credential_prefix: string | null;
+  status: 'active' | 'suspended' | 'revoked';
+  environment: string;
+  team: string | null;
+  risk_level: string;
   policies: number[];
   is_active: boolean;
   total_requests: number;
   blocked_requests: number;
   created_at: string;
   last_seen: string | null;
+  last_seen_at: string | null;
 }
 
 interface LogEntry {
@@ -99,13 +105,15 @@ const MCPAgentDetail: React.FC = () => {
   // ============ FETCH AGENT DATA ============
   const fetchAgent = async () => {
     try {
+      const token = localStorage.getItem('access_token');
+      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
       const [agentRes, logsRes] = await Promise.all([
-        fetch(`${API_URL}/mcp/agents/${id}`),
-        fetch(`${API_URL}/logs?limit=200`),
+        fetch(`${API_URL}/mcp/agents/${id}`, { headers }),
+        fetch(`${API_URL}/logs?limit=200`, { headers }),
       ]);
 
       if (agentRes.ok) {
-        setAgent(await agentRes.json());
+        setAgent({ ...(await agentRes.json()), api_key: '<one-time-agent-key>' });
       } else if (agentRes.status === 404) {
         showSnackbar('Agent not found', 'error');
         setTimeout(() => navigate('/mcp'), 2000);
@@ -137,7 +145,12 @@ const MCPAgentDetail: React.FC = () => {
     if (!agent) return;
     const endpoint = agent.is_active ? 'suspend' : 'resume';
     try {
-      await fetch(`${API_URL}/mcp/agents/${agent.id}/${endpoint}`, { method: 'POST' });
+      const token = localStorage.getItem('access_token');
+      const response = await fetch(`${API_URL}/mcp/agents/${agent.id}/${endpoint}`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!response.ok) throw new Error(`Request failed (${response.status})`);
       showSnackbar(`Agent ${agent.is_active ? 'suspended' : 'resumed'}`, 'success');
       fetchAgent();
     } catch {
@@ -149,7 +162,12 @@ const MCPAgentDetail: React.FC = () => {
     if (!agent) return;
     if (!window.confirm(`Delete agent "${agent.name}"? This cannot be undone.`)) return;
     try {
-      await fetch(`${API_URL}/mcp/agents/${agent.id}`, { method: 'DELETE' });
+      const token = localStorage.getItem('access_token');
+      const response = await fetch(`${API_URL}/mcp/agents/${agent.id}`, {
+        method: 'DELETE',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!response.ok) throw new Error(`Request failed (${response.status})`);
       showSnackbar('Agent deleted', 'success');
       setTimeout(() => navigate('/mcp'), 1000);
     } catch {
@@ -275,7 +293,7 @@ print(response.json())` : '';
             }}
           />
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            {agent.is_active ? 'Agent is ACTIVE and processing requests' : 'Agent is SUSPENDED'}
+            Agent is {agent.status.toUpperCase()}
           </Typography>
           <Chip
             size="small"
@@ -287,9 +305,9 @@ print(response.json())` : '';
           <Typography variant="caption" color="textSecondary" sx={{ ml: 'auto' }}>
             Created: {new Date(agent.created_at).toLocaleString()}
           </Typography>
-          {agent.last_seen && (
+          {(agent.last_seen_at || agent.last_seen) && (
             <Typography variant="caption" color="textSecondary">
-              Last seen: {new Date(agent.last_seen).toLocaleString()}
+              Last used: {new Date(agent.last_seen_at || agent.last_seen || '').toLocaleString()}
             </Typography>
           )}
         </Box>
@@ -384,9 +402,6 @@ print(response.json())` : '';
             <Typography variant="h6">API Key</Typography>
             <Chip size="small" icon={<LockIcon />} label="Bearer Auth" color="primary" variant="outlined" />
           </Box>
-          <Button size="small" startIcon={<CopyIcon />} onClick={() => copyToClipboard(agent.api_key, 'API key')}>
-            Copy
-          </Button>
         </Box>
         <Divider sx={{ mb: 2 }} />
         <Box
@@ -400,10 +415,10 @@ print(response.json())` : '';
             color: '#90caf9',
           }}
         >
-          {agent.api_key}
+          {agent.credential_prefix || 'No credential prefix available'}
         </Box>
         <Alert severity="warning" sx={{ mt: 2 }}>
-          Keep this API key secure. Anyone with this key can make requests as this agent.
+          The full API key is shown only when created or rotated. Use the prefix above to identify this key.
         </Alert>
       </Paper>
 

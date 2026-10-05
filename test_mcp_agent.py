@@ -16,7 +16,7 @@ GATEWAY_URL = "http://localhost:8001/mcp/proxy"
 
 # ⚠️ IMPORTANT: Replace this with your actual API key from the dashboard
 # Get it from: http://localhost:3000/mcp → Agents tab → Click agent → Copy API key
-AGENT_API_KEY = os.getenv("SENTINEL_API_KEY", "sk_sentinel_tzxhRWRMv0YB_gt6dwR7CD-2NRfksq3FMQZqQy0VaIM")
+AGENT_API_KEY = os.getenv("SENTINEL_API_KEY", "")
 
 # Agent name (should match the agent registered in dashboard)
 AGENT_ID = "Claude-Coding-Assistant"
@@ -240,13 +240,13 @@ def run_all_tasks():
     print(f"  Agent:   {AGENT_ID}")
     print(f"  Gateway: {GATEWAY_URL}")
     print(f"  Tasks:   {len(TEST_TASKS)}")
-    print(f"  API Key: {AGENT_API_KEY[:30]}..." if len(AGENT_API_KEY) > 30 else f"  API Key: {AGENT_API_KEY}")
+    print(f"  API Key configured: {'yes' if AGENT_API_KEY else 'no'}")
 
     # Warn if API key not set
-    if AGENT_API_KEY == "PASTE_YOUR_API_KEY_HERE":
+    if not AGENT_API_KEY:
         print("\n  ⚠️  WARNING: API key not set!")
         print("  Get your API key from: http://localhost:3000/mcp → Agents → Click agent")
-        print("  Then edit this file and replace: AGENT_API_KEY = 'PASTE_YOUR_API_KEY_HERE'")
+        print("  Set SENTINEL_API_KEY to the one-time credential from agent registration.")
         print()
         return
 

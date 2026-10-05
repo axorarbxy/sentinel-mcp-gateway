@@ -2,12 +2,37 @@
 Authentication Utilities - Using direct bcrypt
 """
 
+import hashlib
+import secrets
+import hmac
+import re
+
 import bcrypt
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 import os
-import secrets
+
+AGENT_KEY_PATTERN = re.compile(
+    r"^(cye_(?:live|test)_)([a-f0-9]{16})_([A-Za-z0-9_-]{43})$"
+)
+
+
+def create_agent_api_key() -> tuple[str, str, str]:
+    """Return a prefixed high-entropy key, its indexed lookup ID, and display prefix."""
+    environment = os.getenv("SENTINEL_ENVIRONMENT", "dev").lower()
+    key_environment = "live" if environment in {"prod", "production"} else "test"
+    lookup_id = secrets.token_hex(8)
+    key = f"cye_{key_environment}_{lookup_id}_{secrets.token_urlsafe(32)}"
+    return key, lookup_id, f"cye_{key_environment}_{lookup_id}"
+
+
+def parse_agent_api_key(api_key: str) -> Optional[tuple[str, str]]:
+    """Return (lookup_id, secret) for a well-formed key; reject legacy/malformed keys."""
+    match = AGENT_KEY_PATTERN.fullmatch(api_key)
+    if not match:
+        return None
+    return match.group(2), api_key
 
 # JWT Configuration
 SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_urlsafe(32))
@@ -80,3 +105,16 @@ def get_current_user(token: str):
         "username": payload.get("username"),
         "is_admin": payload.get("is_admin", False)
     }
+
+
+def hash_api_key(api_key: str) -> str:
+    """Hash an API key with a stable, constant-time-safe method for storage."""
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+
+
+def verify_api_key(api_key: str, stored_hash: str) -> bool:
+    """Compare a candidate API key against a stored hash using constant-time comparison."""
+    if not api_key or not stored_hash:
+        return False
+    expected = hash_api_key(api_key)
+    return hmac.compare_digest(expected, stored_hash)

@@ -53,6 +53,26 @@ import useLiveTraffic, { TrafficEvent } from '../hooks/useLiveTraffic';
 
 const API_URL = 'http://localhost:8001';
 
+const getAuthHeaders = (extra: Record<string, string> = {}) => {
+  const token = localStorage.getItem('access_token');
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extra,
+  };
+};
+
+const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
+  const token = localStorage.getItem('access_token');
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...getAuthHeaders(),
+      ...(options.headers || {}),
+    },
+  });
+};
+
 // ============ TYPES ============
 interface MCPOverview {
   agents: { total: number; active: number; inactive: number };
@@ -65,7 +85,8 @@ interface MCPAgent {
   id: number;
   name: string;
   description: string | null;
-  api_key: string;
+  credential_prefix: string;
+  status: 'active' | 'suspended' | 'revoked';
   policies: number[];
   is_active: boolean;
   total_requests: number;
@@ -122,7 +143,15 @@ const MCPDashboard: React.FC = () => {
   const [addServerOpen, setAddServerOpen] = useState(false);
 
   // Form states
-  const [newAgent, setNewAgent] = useState({ name: '', description: '' });
+  const [newAgent, setNewAgent] = useState({
+    name: '',
+    description: '',
+    owner: '',
+    team: '',
+    environment: 'dev',
+    risk_level: 'low',
+    allowed_tools: '',
+  });
   const [newPolicy, setNewPolicy] = useState({
     name: '',
     description: '',
@@ -142,6 +171,7 @@ const MCPDashboard: React.FC = () => {
     message: '',
     severity: 'info' as 'success' | 'error' | 'info' | 'warning',
   });
+  const [createdCredential, setCreatedCredential] = useState<string | null>(null);
 
   const showSnackbar = (message: string, severity: 'success' | 'error' | 'info' | 'warning') => {
     setSnackbar({ open: true, message, severity });
@@ -152,10 +182,10 @@ const MCPDashboard: React.FC = () => {
     if (showLoader) setRefreshing(true);
     try {
       const [overviewRes, agentsRes, policiesRes, serversRes] = await Promise.all([
-        fetch(`${API_URL}/mcp/overview`),
-        fetch(`${API_URL}/mcp/agents`),
-        fetch(`${API_URL}/mcp/policies`),
-        fetch(`${API_URL}/mcp/servers`),
+        fetchWithAuth(`${API_URL}/mcp/overview`),
+        fetchWithAuth(`${API_URL}/mcp/agents`),
+        fetchWithAuth(`${API_URL}/mcp/policies`),
+        fetchWithAuth(`${API_URL}/mcp/servers`),
       ]);
 
       if (overviewRes.ok) setOverview(await overviewRes.json());
@@ -181,8 +211,7 @@ const MCPDashboard: React.FC = () => {
   // Auto-refresh agents table when live events arrive
   useEffect(() => {
     if (liveEvents.length > 0) {
-      // Refresh agents list (for updated counters)
-      fetch(`${API_URL}/mcp/agents`)
+      fetchWithAuth(`${API_URL}/mcp/agents`)
         .then((res) => res.ok && res.json())
         .then((data) => data && setAgents(data))
         .catch(() => {});
@@ -196,18 +225,25 @@ const MCPDashboard: React.FC = () => {
       return;
     }
     try {
-      const res = await fetch(`${API_URL}/mcp/agents`, {
+      const res = await fetchWithAuth(`${API_URL}/mcp/agents`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newAgent),
+        body: JSON.stringify({
+          ...newAgent,
+          allowed_tools: newAgent.allowed_tools
+            ? newAgent.allowed_tools.split(',').map((item) => item.trim()).filter(Boolean)
+            : [],
+        }),
       });
+      const payload = await res.json().catch(() => ({}));
       if (res.ok) {
-        showSnackbar('Agent created successfully', 'success');
+        const nextCredential = payload.credential || null;
+        setCreatedCredential(nextCredential);
+        showSnackbar('Agent created successfully. Copy the key now.', 'success');
         setAddAgentOpen(false);
-        setNewAgent({ name: '', description: '' });
+        setNewAgent({ name: '', description: '', owner: '', team: '', environment: 'dev', risk_level: 'low', allowed_tools: '' });
         fetchAll();
       } else {
-        showSnackbar('Failed to create agent', 'error');
+        showSnackbar(payload.detail || 'Failed to create agent', 'error');
       }
     } catch {
       showSnackbar('Network error', 'error');
@@ -221,9 +257,8 @@ const MCPDashboard: React.FC = () => {
       return;
     }
     try {
-      const res = await fetch(`${API_URL}/mcp/policies`, {
+      const res = await fetchWithAuth(`${API_URL}/mcp/policies`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...newPolicy, config: {} }),
       });
       if (res.ok) {
@@ -246,9 +281,8 @@ const MCPDashboard: React.FC = () => {
       return;
     }
     try {
-      const res = await fetch(`${API_URL}/mcp/servers`, {
+      const res = await fetchWithAuth(`${API_URL}/mcp/servers`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newServer),
       });
       if (res.ok) {
@@ -268,7 +302,7 @@ const MCPDashboard: React.FC = () => {
   const handleDeleteAgent = async (id: number) => {
     if (!window.confirm('Delete this agent?')) return;
     try {
-      await fetch(`${API_URL}/mcp/agents/${id}`, { method: 'DELETE' });
+      await fetchWithAuth(`${API_URL}/mcp/agents/${id}`, { method: 'DELETE' });
       showSnackbar('Agent deleted', 'success');
       fetchAll();
     } catch {
@@ -279,7 +313,7 @@ const MCPDashboard: React.FC = () => {
   const handleDeletePolicy = async (id: number) => {
     if (!window.confirm('Delete this policy?')) return;
     try {
-      await fetch(`${API_URL}/mcp/policies/${id}`, { method: 'DELETE' });
+      await fetchWithAuth(`${API_URL}/mcp/policies/${id}`, { method: 'DELETE' });
       showSnackbar('Policy deleted', 'success');
       fetchAll();
     } catch {
@@ -290,7 +324,7 @@ const MCPDashboard: React.FC = () => {
   const handleDeleteServer = async (id: number) => {
     if (!window.confirm('Delete this server?')) return;
     try {
-      await fetch(`${API_URL}/mcp/servers/${id}`, { method: 'DELETE' });
+      await fetchWithAuth(`${API_URL}/mcp/servers/${id}`, { method: 'DELETE' });
       showSnackbar('Server deleted', 'success');
       fetchAll();
     } catch {
@@ -302,7 +336,7 @@ const MCPDashboard: React.FC = () => {
   const handleToggleAgent = async (agent: MCPAgent) => {
     const endpoint = agent.is_active ? 'suspend' : 'resume';
     try {
-      await fetch(`${API_URL}/mcp/agents/${agent.id}/${endpoint}`, { method: 'POST' });
+      await fetchWithAuth(`${API_URL}/mcp/agents/${agent.id}/${endpoint}`, { method: 'POST' });
       showSnackbar(`Agent ${agent.is_active ? 'suspended' : 'resumed'}`, 'success');
       fetchAll();
     } catch {
@@ -312,18 +346,12 @@ const MCPDashboard: React.FC = () => {
 
   const handleTogglePolicy = async (policy: MCPPolicy) => {
     try {
-      await fetch(`${API_URL}/mcp/policies/${policy.id}/toggle`, { method: 'PUT' });
+      await fetchWithAuth(`${API_URL}/mcp/policies/${policy.id}/toggle`, { method: 'PUT' });
       showSnackbar(`Policy ${policy.is_enabled ? 'disabled' : 'enabled'}`, 'success');
       fetchAll();
     } catch {
       showSnackbar('Failed to toggle policy', 'error');
     }
-  };
-
-  // ============ COPY API KEY ============
-  const copyApiKey = (key: string) => {
-    navigator.clipboard.writeText(key);
-    showSnackbar('API key copied to clipboard', 'success');
   };
 
   // ============ RENDERING HELPERS ============
@@ -366,6 +394,19 @@ const MCPDashboard: React.FC = () => {
   return (
     <Box sx={{ p: 3, maxWidth: 1400, mx: 'auto' }}>
       {/* Header */}
+      {createdCredential && (
+        <Alert severity="warning" sx={{ mb: 3 }} action={
+          <Button color="inherit" size="small" onClick={() => navigator.clipboard.writeText(createdCredential)}>
+            Copy key
+          </Button>
+        }>
+          <strong>Credential created:</strong> {createdCredential}
+          <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
+            This credential is shown once. Store it securely; it will not be displayed again.
+          </Typography>
+        </Alert>
+      )}
+
       <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(26,35,50,0.8)' }}>
         <Box
           sx={{
@@ -640,15 +681,12 @@ const MCPDashboard: React.FC = () => {
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Tooltip title="Click to copy">
-                          <Chip
-                            size="small"
-                            icon={<KeyIcon />}
-                            label={`${agent.api_key.slice(0, 20)}...`}
-                            onClick={() => copyApiKey(agent.api_key)}
-                            sx={{ cursor: 'pointer', fontFamily: 'monospace' }}
-                          />
-                        </Tooltip>
+                        <Chip
+                          size="small"
+                          icon={<KeyIcon />}
+                          label={agent.credential_prefix || 'Key prefix unavailable'}
+                          sx={{ fontFamily: 'monospace' }}
+                        />
                       </TableCell>
                       <TableCell align="right">
                         <Tooltip title={agent.is_active ? 'Suspend' : 'Resume'}>

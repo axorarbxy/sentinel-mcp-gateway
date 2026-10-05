@@ -1,61 +1,43 @@
-"""
-WebSocket Test Client
-Tests live traffic WebSocket connection
-"""
+"""Authenticated smoke test for the live traffic WebSocket."""
 
 import asyncio
-import websockets
 import json
+import os
+
+import httpx
+import pytest
+import websockets
+
+GATEWAY_URL = os.getenv("SENTINEL_GATEWAY_URL", "http://localhost:8001")
+OPERATOR_TOKEN = os.getenv("SENTINEL_OPERATOR_TOKEN", "")
+pytestmark = pytest.mark.skipif(
+    not OPERATOR_TOKEN,
+    reason="Set SENTINEL_OPERATOR_TOKEN to run the authenticated WebSocket smoke test",
+)
 
 
+@pytest.mark.asyncio
 async def test_ws():
-    uri = "ws://localhost:8001/mcp/ws/traffic"
-    try:
-        print("Connecting to WebSocket...")
-        async with websockets.connect(uri) as ws:
-            print("[OK] Connected to WebSocket")
-
-            # Receive initial snapshot
-            msg = await ws.recv()
-            data = json.loads(msg)
-            print(f"[SNAPSHOT] Type: {data['type']}")
-            print(f"   Total requests: {data['data']['total_requests']}")
-            print(f"   Total blocked: {data['data']['total_blocked']}")
-            print(f"   Total anomalies: {data['data']['total_anomalies']}")
-
-            # Send ping
-            await ws.send("ping")
-            msg = await ws.recv()
-            print(f"[PONG] {json.loads(msg)}")
-
-            # Wait for live events for 30 seconds
-            print("\n[WAITING] Listening for live events (30 seconds)...")
-            print("   Run test_mcp_agent.py in another terminal to send traffic\n")
-
-            try:
-                while True:
-                    msg = await asyncio.wait_for(ws.recv(), timeout=30.0)
-                    data = json.loads(msg)
-
-                    if data.get("type") == "new_request":
-                        event = data["data"]
-                        status = "[OK]" if event["allowed"] else "[BLOCKED]"
-                        print(f"{status} {event['method']} | Agent: {event['agent_id']}")
-                        print(f"      Reason: {event['reason'][:80]}")
-                        print(f"      Totals: {event['total_requests']} requests, {event['total_blocked']} blocked")
-                    elif data.get("type") == "heartbeat":
-                        print("[HEARTBEAT] Connection alive")
-                    else:
-                        print(f"[EVENT] {data}")
-
-            except asyncio.TimeoutError:
-                print("\n[TIMEOUT] No events received in 30 seconds")
-
-            print("\n[DONE] WebSocket test complete!")
-
-    except Exception as e:
-        print(f"[ERROR] {e}")
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{GATEWAY_URL}/auth/ws-ticket",
+            headers={"Authorization": f"Bearer {OPERATOR_TOKEN}"},
+            timeout=10.0,
+        )
+    response.raise_for_status()
+    ticket = response.json()["ticket"]
+    websocket_url = GATEWAY_URL.replace("http://", "ws://").replace("https://", "wss://")
+    async with websockets.connect(
+        f"{websocket_url}/mcp/ws/traffic",
+        subprotocols=["cybereye.v1", f"cybereye-ticket.{ticket}"],
+    ) as websocket:
+        snapshot = json.loads(await websocket.recv())
+        assert snapshot["type"] == "snapshot"
+        await websocket.send("ping")
+        assert json.loads(await websocket.recv()) == {"type": "pong"}
 
 
 if __name__ == "__main__":
+    if not OPERATOR_TOKEN:
+        raise SystemExit("Set SENTINEL_OPERATOR_TOKEN to run the authenticated WebSocket smoke test")
     asyncio.run(test_ws())
