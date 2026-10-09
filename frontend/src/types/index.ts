@@ -20,6 +20,8 @@ export interface StatsResponse {
   block_rate: number;
   anomaly_alerts: number;
   system_events?: number;
+  sqli_blocks_24h?: number;
+  sqli_blocks_by_hour?: { hour: string; blocks: number }[];
   ml_models: number;
   methods: Record<string, number>;
   monitor_stats: {
@@ -57,7 +59,13 @@ export interface Alert {
   decision: string;
   rule_id: string;
   risk: { score: number; rule_score: number; anomaly_score?: number | null };
-  evidence: { rule: string; method: string; explanation: string; latest_request: Record<string, any> };
+  evidence: {
+    rule: string;
+    method: string;
+    explanation: string;
+    latest_request: Record<string, any>;
+    sqli_findings?: { id: string; name: string; severity: string; field_path: string; evidence: string; recommendation: string }[];
+  };
   request: {
     timestamp: string;
     method: string;

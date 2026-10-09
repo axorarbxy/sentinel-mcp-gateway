@@ -14,12 +14,6 @@ export interface TrafficEvent {
   total_anomalies: number;
 }
 
-interface SnapshotData {
-  total_requests: number;
-  total_blocked: number;
-  total_anomalies: number;
-  recent_logs: any[];
-}
 
 interface UseLiveTrafficOptions {
   url?: string;

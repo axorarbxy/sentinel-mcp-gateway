@@ -1,5 +1,5 @@
 // pages/MCPDashboard.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -49,7 +49,7 @@ import {
   FiberManualRecord as LiveIcon,
   WifiOff as WifiOffIcon,
 } from '@mui/icons-material';
-import useLiveTraffic, { TrafficEvent } from '../hooks/useLiveTraffic';
+import useLiveTraffic from '../hooks/useLiveTraffic';
 
 const API_URL = 'http://localhost:8001';
 
@@ -63,7 +63,6 @@ const getAuthHeaders = (extra: Record<string, string> = {}) => {
 };
 
 const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
-  const token = localStorage.getItem('access_token');
   return fetch(url, {
     ...options,
     headers: {
@@ -173,12 +172,12 @@ const MCPDashboard: React.FC = () => {
   });
   const [createdCredential, setCreatedCredential] = useState<string | null>(null);
 
-  const showSnackbar = (message: string, severity: 'success' | 'error' | 'info' | 'warning') => {
+  const showSnackbar = useCallback((message: string, severity: 'success' | 'error' | 'info' | 'warning') => {
     setSnackbar({ open: true, message, severity });
-  };
+  }, []);
 
   // ============ FETCH DATA ============
-  const fetchAll = async (showLoader = false) => {
+  const fetchAll = useCallback(async (showLoader = false) => {
     if (showLoader) setRefreshing(true);
     try {
       const [overviewRes, agentsRes, policiesRes, serversRes] = await Promise.all([
@@ -199,14 +198,14 @@ const MCPDashboard: React.FC = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [showSnackbar]);
 
   useEffect(() => {
     fetchAll();
     // Slower fallback polling (WebSocket handles real-time)
     const interval = setInterval(() => fetchAll(), 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchAll]);
 
   // Auto-refresh agents table when live events arrive
   useEffect(() => {

@@ -1,0 +1,2 @@
+# Optional shared coordination backend for multi-worker production deployments.
+redis==6.4.0

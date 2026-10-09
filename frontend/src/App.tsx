@@ -8,6 +8,7 @@ import {
   Person as PersonIcon,
   Security as SecurityIcon,
   Storage as StorageIcon,
+  Rule as PolicyIcon,
 } from '@mui/icons-material';
 import Dashboard from './components/Dashboard';
 import AlertsPage from './pages/Alerts';
@@ -27,8 +28,10 @@ import PasswordModule from './pages/modules/PasswordModule';
 import QRModule from './pages/modules/QRModule';
 import MalwareModule from './pages/modules/MalwareModule';
 import NetworkModule from './pages/modules/NetworkModule';
+import PayloadModule from './pages/modules/PayloadModule';
 import InsiderModule from './pages/modules/InsiderModule';
 import AndroidModule from './pages/modules/AndroidModule';
+import SQLiPolicies from './pages/SQLiPolicies';
 
 const darkTheme = createTheme({
   palette: {
@@ -59,6 +62,7 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   useEffect(() => {
     const path = location.pathname;
     if (path.includes('/mcp')) setTabValue(4);
+    else if (path.includes('/policies')) setTabValue(5);
     else if (path.includes('/alerts')) setTabValue(1);
     else if (path.includes('/agents')) setTabValue(2);
     else if (path.includes('/modules')) setTabValue(3);
@@ -102,6 +106,9 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         break;
       case 4:
         navigate('/mcp', { replace: true });
+        break;
+      case 5:
+        navigate('/policies/sqli', { replace: true });
         break;
       default:
         navigate('/dashboard', { replace: true });
@@ -170,6 +177,7 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             <Tab icon={<PersonIcon />} label="Agents" />
             <Tab icon={<SecurityIcon />} label="Modules" />
             <Tab icon={<StorageIcon />} label="MCP" />
+            <Tab icon={<PolicyIcon />} label="Policies" />
           </Tabs>
 
           {/* System Status Indicator */}
@@ -358,6 +366,16 @@ function App() {
             }
           />
           <Route
+            path="/policies/sqli"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <SQLiPolicies />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/modules/password"
             element={
               <ProtectedRoute>
@@ -393,6 +411,16 @@ function App() {
               <ProtectedRoute>
                 <AppLayout>
                   <NetworkModule />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/modules/payload"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <PayloadModule />
                 </AppLayout>
               </ProtectedRoute>
             }

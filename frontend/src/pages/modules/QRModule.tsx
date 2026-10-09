@@ -38,8 +38,6 @@ import {
   Download as DownloadIcon,
   ContentCopy as CopyIcon,
   Share as ShareIcon,
-  CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
   Delete as DeleteIcon,
   History as HistoryIcon,
   QrCodeScanner as ScanIcon,

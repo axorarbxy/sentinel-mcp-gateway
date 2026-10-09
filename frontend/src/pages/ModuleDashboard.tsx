@@ -25,6 +25,7 @@ const modules: ModuleStats[] = [
   { name: 'Phishing Detection', icon: '🔗', path: '/modules/phishing', description: 'URL phishing detection', status: 'active', events: 0 },
   { name: 'Malware Detection', icon: '🦠', path: '/modules/malware', description: 'File/APK malware analysis', status: 'active', events: 0 },
   { name: 'Network IDS', icon: '🌐', path: '/modules/network', description: 'Network intrusion detection', status: 'active', events: 0 },
+  { name: 'Payload Analyzer', icon: '⌘', path: '/modules/payload', description: 'Score MCP and command payloads', status: 'active', events: 0 },
   { name: 'Insider Threat', icon: '👤', path: '/modules/insider', description: 'User behavior analysis', status: 'active', events: 0 },
   { name: 'Android Security', icon: '📱', path: '/modules/android', description: 'App permission auditing', status: 'active', events: 0 },
   { name: 'Password Analyzer', icon: '🔑', path: '/modules/password', description: 'Password strength check', status: 'active', events: 0 },

@@ -1,5 +1,5 @@
 // pages/MCPAgentDetail.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Box,
   Paper,
@@ -98,12 +98,12 @@ const MCPAgentDetail: React.FC = () => {
     severity: 'info' as 'success' | 'error' | 'info' | 'warning',
   });
 
-  const showSnackbar = (message: string, severity: 'success' | 'error' | 'info' | 'warning') => {
+  const showSnackbar = useCallback((message: string, severity: 'success' | 'error' | 'info' | 'warning') => {
     setSnackbar({ open: true, message, severity });
-  };
+  }, []);
 
   // ============ FETCH AGENT DATA ============
-  const fetchAgent = async () => {
+  const fetchAgent = useCallback(async () => {
     try {
       const token = localStorage.getItem('access_token');
       const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
@@ -132,13 +132,13 @@ const MCPAgentDetail: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id, navigate, showSnackbar]);
 
   useEffect(() => {
     fetchAgent();
     const interval = setInterval(fetchAgent, 10000);
     return () => clearInterval(interval);
-  }, [id]);
+  }, [fetchAgent]);
 
   // ============ ACTIONS ============
   const handleToggle = async () => {

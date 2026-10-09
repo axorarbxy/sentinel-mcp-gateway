@@ -77,6 +77,8 @@ const Dashboard: React.FC = () => {
     { label: 'Blocked requests', value: stats.blocked || 0, hint: `${blockRate.toFixed(1)}% of observed events`, color: '#ef5350', icon: <BlockIcon /> },
     { label: 'Security detections', value: stats.anomaly_alerts || 0, hint: 'Rule and behavior signals only', color: '#ffb74d', icon: <WarningIcon /> },
     { label: 'Detection engines', value: stats.ml_models || 0, hint: 'Behavioral models currently trained', color: '#81c784', icon: <SecurityIcon /> },
+    { label: 'SQLi blocks · 24h', value: stats.sqli_blocks_24h || 0, hint: 'Rule-based SQL injection blocks', color: '#ef5350', icon: <BlockIcon /> },
+    { label: 'SQLi blocks · 24h', value: stats.sqli_blocks_24h || 0, hint: 'Rule-based SQL injection blocks', color: '#ef5350', icon: <BlockIcon /> },
   ];
 
   return <Box sx={{ p: 3 }}>
@@ -93,10 +95,34 @@ const Dashboard: React.FC = () => {
 
     <Grid container spacing={2} sx={{ mb: 3 }}>{metricCards.map((card) => <Grid key={card.label} size={{ xs: 12, sm: 6, md: 3 }}><Card><CardContent><Box sx={{ display: 'flex', justifyContent: 'space-between' }}><Typography variant="overline">{card.label}</Typography><Avatar sx={{ bgcolor: `${card.color}22`, color: card.color }}>{card.icon}</Avatar></Box><Typography variant="h3" sx={{ fontWeight: 700 }}>{card.value.toLocaleString()}</Typography><Typography variant="caption" color="text.secondary">{card.hint}</Typography></CardContent></Card></Grid>)}</Grid>
 
+    <Paper sx={{ p: 2, mb: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 2, flexWrap: 'wrap' }}>
+        <Box><Typography variant="h6">SQL injection blocks</Typography><Typography variant="caption" color="text.secondary">Persisted rule blocks over the last 24 hours</Typography></Box>
+        <Typography variant="h4" sx={{ fontWeight: 700 }}>{(stats.sqli_blocks_24h || 0).toLocaleString()}</Typography>
+      </Box>
+      {stats.sqli_blocks_by_hour?.length ? <ResponsiveContainer width="100%" height={150}><AreaChart data={stats.sqli_blocks_by_hour.map((item) => ({ ...item, time: new Date(item.hour).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }))}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="time" /><YAxis allowDecimals={false} /><ChartTooltip /><Area type="stepAfter" dataKey="blocks" stroke="#ef5350" fill="#ef535022" name="SQLi blocks" /></AreaChart></ResponsiveContainer> : <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>No SQLi blocks recorded in the last 24 hours.</Typography>}
+    </Paper>
+
     <Grid container spacing={3} sx={{ mb: 3 }}>
       <Grid size={{ xs: 12, md: 7 }}><Paper sx={{ p: 3, height: 360 }}><Typography variant="h6">Traffic observed by the gateway</Typography><Typography variant="caption" color="text.secondary">Actual request logs; only populated while the gateway is running.</Typography>{traffic.length ? <ResponsiveContainer width="100%" height={270}><AreaChart data={traffic}><defs><linearGradient id="events" x1="0" x2="0" y1="0" y2="1"><stop offset="5%" stopColor="#90caf9" stopOpacity={.45}/><stop offset="95%" stopColor="#90caf9" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="time" /><YAxis allowDecimals={false} /><ChartTooltip /><Area type="monotone" dataKey="events" stroke="#90caf9" fill="url(#events)" name="Events" /><Area type="monotone" dataKey="blocked" stroke="#ef5350" fill="none" name="Blocked" /></AreaChart></ResponsiveContainer> : <Box sx={{ height: 260, display: 'grid', placeItems: 'center' }}><Typography color="text.secondary">No traffic has been recorded yet.</Typography></Box>}</Paper></Grid>
       <Grid size={{ xs: 12, md: 5 }}><Paper sx={{ p: 3, height: 360 }}><Typography variant="h6">Detection sources</Typography><Typography variant="caption" color="text.secondary">Security signals only—protocol errors are excluded.</Typography>{detections.length ? <><ResponsiveContainer width="100%" height={220}><PieChart><Pie data={detections} dataKey="value" nameKey="name" innerRadius={55} outerRadius={85}>{detections.map((_, i) => <Cell key={i} fill={COLORS[i]} />)}</Pie><ChartTooltip /></PieChart></ResponsiveContainer>{detections.map((item, i) => <Box key={item.name} sx={{ display: 'flex', justifyContent: 'space-between', py: .5 }}><Typography><Box component="span" sx={{ color: COLORS[i] }}>● </Box>{item.name}</Typography><Typography sx={{ fontWeight: 700 }}>{item.value}</Typography></Box>)}</> : <Box sx={{ height: 260, display: 'grid', placeItems: 'center' }}><Typography color="text.secondary">No security detections recorded.</Typography></Box>}</Paper></Grid>
     </Grid>
+
+    <Paper sx={{ p: 3, mb: 3 }}>
+      <Typography variant="h6">SQL injection blocks</Typography>
+      <Typography variant="caption" color="text.secondary">Persisted rule blocks by hour over the last 24 hours.</Typography>
+      {(stats.sqli_blocks_by_hour || []).length ? (
+        <ResponsiveContainer width="100%" height={220}>
+          <AreaChart data={stats.sqli_blocks_by_hour}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="hour" tickFormatter={(value) => new Date(value).toLocaleTimeString([], { hour: '2-digit' })} />
+            <YAxis allowDecimals={false} />
+            <ChartTooltip labelFormatter={(value) => new Date(String(value)).toLocaleString()} />
+            <Area type="monotone" dataKey="blocks" stroke="#ef5350" fill="#ef535033" name="SQLi blocks" />
+          </AreaChart>
+        </ResponsiveContainer>
+      ) : <Box sx={{ height: 180, display: 'grid', placeItems: 'center' }}><Typography color="text.secondary">No SQLi blocks recorded in the last 24 hours.</Typography></Box>}
+    </Paper>
 
     <Paper sx={{ p: 3 }}><Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}><Box><Typography variant="h6">Recent gateway events</Typography><Typography variant="caption" color="text.secondary">Security enforcement and protocol/system events are labeled separately.</Typography></Box><Chip size="small" label={connected ? 'LIVE' : 'OFFLINE'} color={connected ? 'success' : 'default'} /></Box><Divider />
       {logs.length ? logs.slice(-12).reverse().map((log, index) => { const blocked = !log.policy_allowed || log.analysis_anomaly || log.ml_anomaly; const system = log.event_category === 'system'; return <Box key={log.event_id || `${log.timestamp}-${index}`} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1.25, borderBottom: '1px solid', borderColor: 'divider' }}>{blocked ? <BlockIcon color={system ? 'warning' : 'error'} /> : <CheckCircleIcon color="success" />}<Box sx={{ flex: 1, minWidth: 0 }}><Typography sx={{ fontWeight: 600 }}>{log.method} <Typography component="span" variant="caption" color="text.secondary">· {log.agent_id}</Typography></Typography><Typography variant="caption" color="text.secondary">{log.policy_reason}</Typography></Box><Chip size="small" label={system ? 'SYSTEM' : blocked ? 'BLOCKED' : 'ALLOWED'} color={system ? 'warning' : blocked ? 'error' : 'success'} /><Typography variant="caption" color="text.secondary">{new Date(log.timestamp).toLocaleTimeString()}</Typography></Box>; }) : <Box sx={{ py: 5, textAlign: 'center' }}><Typography color="text.secondary">Events will appear as agents send MCP requests.</Typography></Box>}

@@ -15,20 +15,12 @@ import {
   Divider,
 } from '@mui/material';
 import {
-  Security as SecurityIcon,
   CheckCircle as CheckCircleIcon,
   Warning as WarningIcon,
   Error as ErrorIcon,
   Info as InfoIcon,
 } from '@mui/icons-material';
 
-interface ModuleResult {
-  module: string;
-  severity: string;
-  description: string;
-  confidence: number;
-  data: any;
-}
 
 interface ModuleBaseProps {
   title: string;

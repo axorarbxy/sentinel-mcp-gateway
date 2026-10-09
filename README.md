@@ -205,12 +205,10 @@ pip install -r requirements.txt
 \# Copy environment settings
 cp .env.example .env
 
-\# Start the backend (Windows PowerShell)
-cd src
-$env:PYTHONPATH='R:\sentinel-mcp-gateway\src'
+\# Start the backend from the repository root (Windows PowerShell)
 $env:PYTHONUTF8='1'
 $env:PYTHONIOENCODING='utf-8'
-..\venv312\Scripts\python.exe -m uvicorn gateway:app --host 127.0.0.1 --port 8001
+python -m uvicorn backend.gateway:app --host 127.0.0.1 --port 8001
 
 \# Start the frontend (separate terminal)
 cd frontend
@@ -347,9 +345,8 @@ upstream values before starting Uvicorn:
 $env:SENTINEL_MCP_UPSTREAM_URL = "https://mcp.internal.example/mcp"
 $env:SENTINEL_MCP_UPSTREAM_NAME = "internal-tools"
 $env:SENTINEL_MCP_UPSTREAM_TOKEN = ""
-Set-Location src
-$env:PYTHONPATH = (Get-Location).Path
-..\venv\Scripts\python.exe -m uvicorn gateway:app --host 127.0.0.1 --port 8001
+Set-Location (git rev-parse --show-toplevel)
+venv\Scripts\python.exe -m uvicorn backend.gateway:app --host 127.0.0.1 --port 8001
 ```
 
 The timeout defaults to 30 seconds. Unknown methods are blocked by default;
@@ -361,7 +358,7 @@ details. No automatic retries are made.
 
 ### Decision hook and event schema
 
-`src/mcp_interception.py` defines the `InterceptionEvent` and `Decision` data
+`backend/mcp_interception.py` defines the `InterceptionEvent` and `Decision` data
 classes and the asynchronous `decision_hook(event, agent)` extension point.
 The default hook only enforces `allowed_tools`, message direction, and the
 configured unknown-method mode. `allow`, `block`, and `flag` are supported;

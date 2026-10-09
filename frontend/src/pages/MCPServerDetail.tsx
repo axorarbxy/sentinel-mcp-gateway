@@ -1,5 +1,5 @@
 // pages/MCPServerDetail.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Box,
   Paper,
@@ -99,12 +99,12 @@ const MCPServerDetail: React.FC = () => {
     severity: 'info' as 'success' | 'error' | 'info' | 'warning',
   });
 
-  const showSnackbar = (message: string, severity: 'success' | 'error' | 'info' | 'warning') => {
+  const showSnackbar = useCallback((message: string, severity: 'success' | 'error' | 'info' | 'warning') => {
     setSnackbar({ open: true, message, severity });
-  };
+  }, []);
 
   // ============ FETCH SERVER ============
-  const fetchServer = async () => {
+  const fetchServer = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/mcp/servers`);
       if (res.ok) {
@@ -123,13 +123,13 @@ const MCPServerDetail: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id, navigate, showSnackbar]);
 
   useEffect(() => {
     fetchServer();
     const interval = setInterval(fetchServer, 15000);
     return () => clearInterval(interval);
-  }, [id]);
+  }, [fetchServer]);
 
   // ============ ACTIONS ============
   const handleHealthCheck = async () => {

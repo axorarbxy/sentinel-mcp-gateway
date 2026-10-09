@@ -1,12 +1,10 @@
 // pages/MCPPolicyDetail.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Box,
   Paper,
   Typography,
   Grid,
-  Card,
-  CardContent,
   Chip,
   Button,
   IconButton,
@@ -17,12 +15,6 @@ import {
   Alert,
   Snackbar,
   CircularProgress,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Switch,
-  FormControlLabel,
   List,
   ListItem,
   ListItemText,
@@ -34,7 +26,6 @@ import {
 import {
   ArrowBack as ArrowBackIcon,
   Security as SecurityIcon,
-  Save as SaveIcon,
   Refresh as RefreshIcon,
   Delete as DeleteIcon,
   PlayArrow as PlayArrowIcon,
@@ -122,7 +113,6 @@ const MCPPolicyDetail: React.FC = () => {
   const navigate = useNavigate();
   const [policy, setPolicy] = useState<MCPPolicy | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [testInput, setTestInput] = useState('');
   const [testResult, setTestResult] = useState<{ status: string; reason: string } | null>(null);
   const [snackbar, setSnackbar] = useState({
@@ -131,12 +121,12 @@ const MCPPolicyDetail: React.FC = () => {
     severity: 'info' as 'success' | 'error' | 'info' | 'warning',
   });
 
-  const showSnackbar = (message: string, severity: 'success' | 'error' | 'info' | 'warning') => {
+  const showSnackbar = useCallback((message: string, severity: 'success' | 'error' | 'info' | 'warning') => {
     setSnackbar({ open: true, message, severity });
-  };
+  }, []);
 
   // ============ FETCH POLICY ============
-  const fetchPolicy = async () => {
+  const fetchPolicy = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/mcp/policies`);
       if (res.ok) {
@@ -155,11 +145,11 @@ const MCPPolicyDetail: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id, navigate, showSnackbar]);
 
   useEffect(() => {
     fetchPolicy();
-  }, [id]);
+  }, [fetchPolicy]);
 
   // ============ ACTIONS ============
   const handleToggle = async () => {

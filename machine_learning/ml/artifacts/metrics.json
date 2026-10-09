@@ -1,0 +1,109 @@
+{
+  "model_version": "payload-rf-v1",
+  "trained_at": "2026-10-06T19:07:54.280630+00:00",
+  "thresholds": {
+    "warn": 0.5,
+    "block": 0.85
+  },
+  "metrics": {
+    "accuracy": 0.75,
+    "precision": 0.6666666666666666,
+    "recall": 1.0,
+    "f1": 0.8,
+    "roc_auc": 0.75,
+    "pr_auc": 0.8333333333333333,
+    "fpr": 0.5,
+    "fnr": 0.0,
+    "confusion_matrix": {
+      "tn": 1,
+      "fp": 1,
+      "fn": 0,
+      "tp": 2
+    },
+    "macro_precision": 0.8333333333333333,
+    "macro_recall": 0.75,
+    "macro_f1": 0.7333333333333334,
+    "top_features": [
+      {
+        "feature": "manual_entropy",
+        "importance": 0.1794871794871795
+      },
+      {
+        "feature": "tfidf_t ",
+        "importance": 0.10256410256410257
+      },
+      {
+        "feature": "manual_length",
+        "importance": 0.10256410256410257
+      },
+      {
+        "feature": "tfidf_re",
+        "importance": 0.07692307692307693
+      },
+      {
+        "feature": "tfidf_ad",
+        "importance": 0.07371794871794872
+      },
+      {
+        "feature": "tfidf_ /",
+        "importance": 0.06410256410256411
+      },
+      {
+        "feature": "manual_special_chars",
+        "importance": 0.06410256410256411
+      },
+      {
+        "feature": "tfidf_et",
+        "importance": 0.05128205128205129
+      },
+      {
+        "feature": "tfidf_le",
+        "importance": 0.05128205128205129
+      },
+      {
+        "feature": "manual_shell_hits",
+        "importance": 0.041666666666666664
+      },
+      {
+        "feature": "tfidf_ -",
+        "importance": 0.025641025641025644
+      },
+      {
+        "feature": "tfidf_/tm",
+        "importance": 0.025641025641025644
+      },
+      {
+        "feature": "tfidf_dm",
+        "importance": 0.025641025641025644
+      },
+      {
+        "feature": "tfidf_er",
+        "importance": 0.025641025641025644
+      },
+      {
+        "feature": "tfidf_mp",
+        "importance": 0.025641025641025644
+      },
+      {
+        "feature": "tfidf_/e",
+        "importance": 0.012820512820512822
+      },
+      {
+        "feature": "tfidf_d ",
+        "importance": 0.012820512820512822
+      },
+      {
+        "feature": "tfidf_etc",
+        "importance": 0.012820512820512822
+      },
+      {
+        "feature": "tfidf_m ",
+        "importance": 0.012820512820512822
+      },
+      {
+        "feature": "tfidf_tc",
+        "importance": 0.012820512820512822
+      }
+    ]
+  }
+}
