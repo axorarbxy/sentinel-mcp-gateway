@@ -125,7 +125,8 @@ class BehavioralMonitor:
         if agent_id in self.history and len(self.history[agent_id]) > 0:
             last_request = self.history[agent_id][-1]
             last_time = datetime.fromisoformat(last_request.get("timestamp", datetime.now().isoformat()))
-            time_diff = (datetime.now() - last_time).total_seconds()
+            now = datetime.now(last_time.tzinfo) if last_time.tzinfo else datetime.now()
+            time_diff = (now - last_time).total_seconds()
             # Normalize to [0, 1] with cap at 1 hour
             return min(time_diff / 3600.0, 1.0)
         return 1.0  # No history, assume normal
@@ -140,9 +141,6 @@ class BehavioralMonitor:
         if "timestamp" not in request:
             request["timestamp"] = datetime.now().isoformat()
         
-        # Store in history
-        self.history[agent_id].append(request)
-        
         # Extract features
         features = self.extract_features(request)
         
@@ -150,6 +148,9 @@ class BehavioralMonitor:
         freq_feature = self.get_frequency_feature(agent_id)
         features = np.append(features, freq_feature)
         
+        # Store in history after computing the interval from the previous request.
+        self.history[agent_id].append(request)
+
         # Store features
         self.feature_history[agent_id].append(features)
         

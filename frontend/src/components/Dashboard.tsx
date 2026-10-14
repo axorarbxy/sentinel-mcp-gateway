@@ -3,11 +3,25 @@ import { Avatar, Box, Card, CardContent, Chip, Divider, Grid, IconButton, Linear
 import { Block as BlockIcon, CheckCircle as CheckCircleIcon, ErrorOutlined as ErrorIcon, Hub as HubIcon, Refresh as RefreshIcon, Security as SecurityIcon, Timeline as TimelineIcon, Warning as WarningIcon } from '@mui/icons-material';
 import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from 'recharts';
 import { gatewayApi } from '../services/api';
-import { Alert, LogEntry, StatsResponse } from '../types';
-import useLiveTraffic from '../hooks/useLiveTraffic';
+import { LogEntry, StatsResponse } from '../types';
+import useLiveTraffic, { TrafficEvent } from '../hooks/useLiveTraffic';
 import ExtensionBanner from './ExtensionBanner';
 
-const COLORS = ['#ff9800', '#ab47bc'];
+const DETECTION_CATEGORIES = [
+  { name: 'SQL injection', color: '#ef5350' },
+  { name: 'Path traversal', color: '#ff9800' },
+  { name: 'Tool policy violations', color: '#ab47bc' },
+  { name: 'ML payload detections', color: '#42a5f5' },
+  { name: 'Protocol validation', color: '#26a69a' },
+  { name: 'Behavioral anomalies', color: '#ec407a' },
+  { name: 'Other gateway rules', color: '#78909c' },
+];
+const API_URL = 'http://localhost:8001';
+
+interface MCPOverview {
+  agents: { total: number; active: number; inactive: number };
+  traffic: { total_requests: number; blocked_requests: number; allowed_requests: number };
+}
 
 const formatAge = (timestamp?: string) => {
   if (!timestamp) return 'No events received';
@@ -18,19 +32,34 @@ const formatAge = (timestamp?: string) => {
 const Dashboard: React.FC = () => {
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [mcpOverview, setMcpOverview] = useState<MCPOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { connected, events } = useLiveTraffic();
 
   const fetchData = useCallback(async () => {
     try {
-      const [statsData, logsData, alertsData] = await Promise.all([
-        gatewayApi.getStats(), gatewayApi.getLogs(200), gatewayApi.getAnomalies(200),
+      const token = localStorage.getItem('access_token');
+      const overviewRequest = fetch(`${API_URL}/mcp/overview`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error(`MCP overview request failed (${response.status})`);
+          }
+          return await response.json() as MCPOverview;
+        })
+        .catch((requestError) => {
+          console.error('Unable to load persisted MCP overview:', requestError);
+          return null;
+        });
+      const [statsData, logsData] = await Promise.all([
+        gatewayApi.getStats(), gatewayApi.getLogs(200),
       ]);
+      const overviewData = await overviewRequest;
       setStats(statsData);
       setLogs(logsData.logs);
-      setAlerts(alertsData.alerts);
+      setMcpOverview(overviewData);
       setError(null);
     } catch {
       setError('Unable to reach the gateway on port 8001.');
@@ -50,35 +79,33 @@ const Dashboard: React.FC = () => {
   }, [events.length, fetchData]);
 
   const traffic = useMemo(() => {
-    const buckets = new Map<string, { time: string; events: number; blocked: number }>();
-    logs.forEach((log) => {
-      const date = new Date(log.timestamp);
-      const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}-${date.getHours()}`;
-      const item = buckets.get(key) || { time: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), events: 0, blocked: 0 };
-      item.events += 1;
-      if (!log.policy_allowed || log.analysis_anomaly || log.ml_anomaly) item.blocked += 1;
-      buckets.set(key, item);
-    });
-    return [...buckets.values()].slice(-24);
-  }, [logs]);
+    return (stats?.traffic_by_hour || []).map((item) => ({
+      ...item,
+      time: new Date(item.hour).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    }));
+  }, [stats]);
 
-  const detections = useMemo(() => [
-    { name: 'Rule detections', value: alerts.filter((alert) => alert.type === 'rule_based').length },
-    { name: 'Behavioral anomalies', value: alerts.filter((alert) => alert.type === 'ml_based').length },
-  ].filter((item) => item.value > 0), [alerts]);
+  const detections = useMemo(() => {
+    return DETECTION_CATEGORIES.map((category) => ({
+      ...category,
+      value: stats?.detection_categories?.[category.name] || 0,
+    }));
+  }, [stats]);
 
   if (loading) return <LinearProgress sx={{ mt: 4 }} />;
   if (error || !stats) return <Paper sx={{ p: 4, m: 3, textAlign: 'center' }}><ErrorIcon color="error" sx={{ fontSize: 44 }} /><Typography variant="h6" sx={{ mt: 1 }}>{error || 'Gateway data is unavailable.'}</Typography><IconButton aria-label="Retry" onClick={fetchData}><RefreshIcon /></IconButton></Paper>;
 
   const lastEvent = events[0]?.timestamp || logs[logs.length - 1]?.timestamp;
-  const blockRate = Math.min(100, Math.max(0, stats.block_rate || 0));
+  const totalRequests = stats.total_requests;
+  const blockedRequests = stats.blocked;
+  const blockRate = totalRequests > 0 ? Math.min(100, Math.max(0, (blockedRequests / totalRequests) * 100)) : 0;
   const metricCards = [
-    { label: 'Events', value: stats.total_requests, hint: 'Current gateway process window', color: '#90caf9', icon: <TimelineIcon /> },
-    { label: 'Blocked requests', value: stats.blocked || 0, hint: `${blockRate.toFixed(1)}% of observed events`, color: '#ef5350', icon: <BlockIcon /> },
-    { label: 'Security detections', value: stats.anomaly_alerts || 0, hint: 'Rule and behavior signals only', color: '#ffb74d', icon: <WarningIcon /> },
+    { label: 'Agent requests', value: totalRequests, hint: 'Persisted requests across registered agents', color: '#D56B82', icon: <TimelineIcon /> },
+    { label: 'Blocked requests', value: blockedRequests, hint: `${blockRate.toFixed(1)}% of observed agent requests`, color: '#ef5350', icon: <BlockIcon /> },
+    { label: 'Security detections', value: stats.anomaly_alerts || 0, hint: 'Persisted blocked and flagged events · all time', color: '#ffb74d', icon: <WarningIcon /> },
     { label: 'Detection engines', value: stats.ml_models || 0, hint: 'Behavioral models currently trained', color: '#81c784', icon: <SecurityIcon /> },
     { label: 'SQLi blocks · 24h', value: stats.sqli_blocks_24h || 0, hint: 'Rule-based SQL injection blocks', color: '#ef5350', icon: <BlockIcon /> },
-    { label: 'SQLi blocks · 24h', value: stats.sqli_blocks_24h || 0, hint: 'Rule-based SQL injection blocks', color: '#ef5350', icon: <BlockIcon /> },
+    { label: 'Registered agents', value: mcpOverview?.agents.total || 0, hint: `${mcpOverview?.agents.active || 0} active`, color: '#D56B82', icon: <SecurityIcon /> },
   ];
 
   return <Box sx={{ p: 3 }}>
@@ -104,8 +131,8 @@ const Dashboard: React.FC = () => {
     </Paper>
 
     <Grid container spacing={3} sx={{ mb: 3 }}>
-      <Grid size={{ xs: 12, md: 7 }}><Paper sx={{ p: 3, height: 360 }}><Typography variant="h6">Traffic observed by the gateway</Typography><Typography variant="caption" color="text.secondary">Actual request logs; only populated while the gateway is running.</Typography>{traffic.length ? <ResponsiveContainer width="100%" height={270}><AreaChart data={traffic}><defs><linearGradient id="events" x1="0" x2="0" y1="0" y2="1"><stop offset="5%" stopColor="#90caf9" stopOpacity={.45}/><stop offset="95%" stopColor="#90caf9" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="time" /><YAxis allowDecimals={false} /><ChartTooltip /><Area type="monotone" dataKey="events" stroke="#90caf9" fill="url(#events)" name="Events" /><Area type="monotone" dataKey="blocked" stroke="#ef5350" fill="none" name="Blocked" /></AreaChart></ResponsiveContainer> : <Box sx={{ height: 260, display: 'grid', placeItems: 'center' }}><Typography color="text.secondary">No traffic has been recorded yet.</Typography></Box>}</Paper></Grid>
-      <Grid size={{ xs: 12, md: 5 }}><Paper sx={{ p: 3, height: 360 }}><Typography variant="h6">Detection sources</Typography><Typography variant="caption" color="text.secondary">Security signals only—protocol errors are excluded.</Typography>{detections.length ? <><ResponsiveContainer width="100%" height={220}><PieChart><Pie data={detections} dataKey="value" nameKey="name" innerRadius={55} outerRadius={85}>{detections.map((_, i) => <Cell key={i} fill={COLORS[i]} />)}</Pie><ChartTooltip /></PieChart></ResponsiveContainer>{detections.map((item, i) => <Box key={item.name} sx={{ display: 'flex', justifyContent: 'space-between', py: .5 }}><Typography><Box component="span" sx={{ color: COLORS[i] }}>● </Box>{item.name}</Typography><Typography sx={{ fontWeight: 700 }}>{item.value}</Typography></Box>)}</> : <Box sx={{ height: 260, display: 'grid', placeItems: 'center' }}><Typography color="text.secondary">No security detections recorded.</Typography></Box>}</Paper></Grid>
+      <Grid size={{ xs: 12, md: 7 }}><Paper sx={{ p: 3, height: 360 }}><Typography variant="h6">Traffic observed by the gateway</Typography><Typography variant="caption" color="text.secondary">Persisted request events · last 24 hours</Typography>{traffic.length ? <ResponsiveContainer width="100%" height={270}><AreaChart data={traffic}><defs><linearGradient id="events" x1="0" x2="0" y1="0" y2="1"><stop offset="5%" stopColor="#D56B82" stopOpacity={.45}/><stop offset="95%" stopColor="#D56B82" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="time" /><YAxis allowDecimals={false} /><ChartTooltip /><Area type="monotone" dataKey="events" stroke="#D56B82" fill="url(#events)" name="Events" /><Area type="monotone" dataKey="blocked" stroke="#ef5350" fill="none" name="Blocked" /></AreaChart></ResponsiveContainer> : <Box sx={{ height: 260, display: 'grid', placeItems: 'center' }}><Typography color="text.secondary">No traffic has been recorded yet.</Typography></Box>}</Paper></Grid>
+      <Grid size={{ xs: 12, md: 5 }}><Paper sx={{ p: 3, minHeight: 440 }}><Typography variant="h6">Detection categories</Typography><Typography variant="caption" color="text.secondary">All retained blocked and flagged events. Category counts can overlap; zero-count categories remain visible.</Typography><ResponsiveContainer width="100%" height={200}><PieChart><Pie data={detections.filter((item) => item.value > 0)} dataKey="value" nameKey="name" innerRadius={50} outerRadius={78}>{detections.filter((item) => item.value > 0).map((item) => <Cell key={item.name} fill={item.color} />)}</Pie><ChartTooltip /></PieChart></ResponsiveContainer>{detections.map((item) => <Box key={item.name} sx={{ display: 'flex', justifyContent: 'space-between', py: .25 }}><Typography variant="body2"><Box component="span" sx={{ color: item.color }}>● </Box>{item.name}</Typography><Typography variant="body2" sx={{ fontWeight: 700 }}>{item.value}</Typography></Box>)}</Paper></Grid>
     </Grid>
 
     <Paper sx={{ p: 3, mb: 3 }}>
@@ -124,8 +151,46 @@ const Dashboard: React.FC = () => {
       ) : <Box sx={{ height: 180, display: 'grid', placeItems: 'center' }}><Typography color="text.secondary">No SQLi blocks recorded in the last 24 hours.</Typography></Box>}
     </Paper>
 
-    <Paper sx={{ p: 3 }}><Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}><Box><Typography variant="h6">Recent gateway events</Typography><Typography variant="caption" color="text.secondary">Security enforcement and protocol/system events are labeled separately.</Typography></Box><Chip size="small" label={connected ? 'LIVE' : 'OFFLINE'} color={connected ? 'success' : 'default'} /></Box><Divider />
-      {logs.length ? logs.slice(-12).reverse().map((log, index) => { const blocked = !log.policy_allowed || log.analysis_anomaly || log.ml_anomaly; const system = log.event_category === 'system'; return <Box key={log.event_id || `${log.timestamp}-${index}`} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1.25, borderBottom: '1px solid', borderColor: 'divider' }}>{blocked ? <BlockIcon color={system ? 'warning' : 'error'} /> : <CheckCircleIcon color="success" />}<Box sx={{ flex: 1, minWidth: 0 }}><Typography sx={{ fontWeight: 600 }}>{log.method} <Typography component="span" variant="caption" color="text.secondary">· {log.agent_id}</Typography></Typography><Typography variant="caption" color="text.secondary">{log.policy_reason}</Typography></Box><Chip size="small" label={system ? 'SYSTEM' : blocked ? 'BLOCKED' : 'ALLOWED'} color={system ? 'warning' : blocked ? 'error' : 'success'} /><Typography variant="caption" color="text.secondary">{new Date(log.timestamp).toLocaleTimeString()}</Typography></Box>; }) : <Box sx={{ py: 5, textAlign: 'center' }}><Typography color="text.secondary">Events will appear as agents send MCP requests.</Typography></Box>}
+    <Paper sx={{ p: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+        <Box>
+          <Typography variant="h6">Recent MCP agent events</Typography>
+          <Typography variant="caption" color="text.secondary">Persisted history with live updates for requests passing through the gateway.</Typography>
+        </Box>
+        <Chip size="small" label={connected ? 'LIVE' : 'OFFLINE'} color={connected ? 'success' : 'default'} />
+      </Box>
+      <Divider />
+      {events.length ? events.slice(0, 25).map((event: TrafficEvent) => (
+        <Box key={event.event_id} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1.25, borderBottom: '1px solid', borderColor: 'divider', flexWrap: 'wrap' }}>
+          {event.decision === 'block' ? <BlockIcon color="error" /> : <CheckCircleIcon color="success" />}
+          <Box sx={{ flex: 1, minWidth: 180 }}>
+            <Typography sx={{ fontWeight: 600 }}>
+              {event.agent_name}
+              <Typography component="span" variant="caption" color="text.secondary"> · {event.tool_name || event.method}</Typography>
+            </Typography>
+            <Typography variant="caption" color="text.secondary">{event.decision_reason || 'No policy reason reported'}</Typography>
+          </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ minWidth: 150 }}>
+            ML {event.ml_score === null ? 'n/a' : `${(event.ml_score * 100).toFixed(1)}%`} · Rule {event.rule_risk_score === null ? 'n/a' : `${(event.rule_risk_score * 100).toFixed(1)}%`}
+          </Typography>
+          <Chip size="small" label={event.decision.toUpperCase()} color={event.decision === 'block' ? 'error' : event.decision === 'flag' ? 'warning' : 'success'} />
+          <Typography variant="caption" color="text.secondary">{new Date(event.timestamp).toLocaleTimeString()}</Typography>
+        </Box>
+      )) : logs.length ? logs.slice(-12).reverse().map((log, index) => {
+        const blocked = !log.policy_allowed || log.analysis_anomaly || log.ml_anomaly;
+        const system = log.event_category === 'system';
+        return (
+          <Box key={log.event_id || `${log.timestamp}-${index}`} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1.25, borderBottom: '1px solid', borderColor: 'divider' }}>
+            {blocked ? <BlockIcon color={system ? 'warning' : 'error'} /> : <CheckCircleIcon color="success" />}
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography sx={{ fontWeight: 600 }}>{log.method}<Typography component="span" variant="caption" color="text.secondary"> · {log.agent_id}</Typography></Typography>
+              <Typography variant="caption" color="text.secondary">{log.policy_reason}</Typography>
+            </Box>
+            <Chip size="small" label={system ? 'SYSTEM' : blocked ? 'BLOCKED' : 'ALLOWED'} color={system ? 'warning' : blocked ? 'error' : 'success'} />
+            <Typography variant="caption" color="text.secondary">{new Date(log.timestamp).toLocaleTimeString()}</Typography>
+          </Box>
+        );
+      }) : <Box sx={{ py: 5, textAlign: 'center' }}><Typography color="text.secondary">No MCP agent traffic yet. Send requests through /mcp/proxy to populate this dashboard.</Typography></Box>}
     </Paper>
   </Box>;
 };

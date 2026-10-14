@@ -53,7 +53,7 @@ const AlertsPage: React.FC = () => {
     ['Active alerts', active.length, 'Open analyst work items', '#ff9800'],
     ['Critical', critical.length, 'Risk score 90 or higher', '#ef5350'],
     ['Unacknowledged', unacknowledged.length, 'Awaiting first review', '#ab47bc'],
-    ['Blocked', blocked.length, 'Enforcement decisions', '#90caf9'],
+    ['Blocked', blocked.length, 'Enforcement decisions', '#D56B82'],
   ];
 
   return <Box sx={{ p: 3 }}>

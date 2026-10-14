@@ -16,7 +16,6 @@ import {
   Checkbox,
   FormControlLabel,
   LinearProgress,
-  Divider,
   CircularProgress,
 } from '@mui/material';
 import {
@@ -25,8 +24,6 @@ import {
   PersonAdd as PersonAddIcon,
   Check as CheckIcon,
   Close as CloseIcon,
-  Google as GoogleIcon,
-  GitHub as GitHubIcon,
 } from '@mui/icons-material';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 
@@ -237,7 +234,7 @@ const Register: React.FC = () => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'linear-gradient(135deg, #0a1929 0%, #1a2332 100%)',
+        background: 'linear-gradient(135deg, #080808 0%, #171214 100%)',
         p: { xs: 2, sm: 3 },
       }}
     >
@@ -248,7 +245,7 @@ const Register: React.FC = () => {
           width: '100%',
           p: { xs: 3, sm: 4 },
           borderRadius: 3,
-          background: 'rgba(26, 35, 50, 0.95)',
+          background: 'rgba(23, 18, 20, 0.95)',
           backdropFilter: 'blur(10px)',
           border: '1px solid rgba(255,255,255,0.05)',
           maxHeight: '90vh',
@@ -301,30 +298,6 @@ const Register: React.FC = () => {
               <Typography variant="body2" color="textSecondary">
                 Join Sentinel-MCP Security Platform
               </Typography>
-            </Box>
-
-            <Box sx={{ mb: 3 }}>
-              <Button
-                fullWidth
-                variant="outlined"
-                startIcon={<GoogleIcon />}
-                sx={{ mb: 1.5, py: 1.5, borderRadius: 2 }}
-              >
-                Continue with Google
-              </Button>
-              <Button
-                fullWidth
-                variant="outlined"
-                startIcon={<GitHubIcon />}
-                sx={{ py: 1.5, borderRadius: 2 }}
-              >
-                Continue with GitHub
-              </Button>
-              <Divider sx={{ my: 3 }}>
-                <Typography variant="body2" color="textSecondary">
-                  OR
-                </Typography>
-              </Divider>
             </Box>
 
             <form onSubmit={handleSubmit} noValidate>
@@ -536,12 +509,12 @@ const Register: React.FC = () => {
                   py: 1.5,
                   fontSize: '1rem',
                   borderRadius: 2,
-                  background: 'linear-gradient(135deg, #90caf9, #42a5f5)',
+                  background: 'linear-gradient(135deg, #6D001A, #8A1733)',
                   '&:hover': {
-                    background: 'linear-gradient(135deg, #42a5f5, #1e88e5)',
+                    background: 'linear-gradient(135deg, #8A1733, #4A0012)',
                   },
                   '&:disabled': {
-                    background: 'rgba(144,202,249,0.3)',
+                    background: 'rgba(109,0,26,0.45)',
                   },
                 }}
               >
@@ -590,9 +563,9 @@ const Register: React.FC = () => {
                 py: 1.5,
                 px: 4,
                 borderRadius: 2,
-                background: 'linear-gradient(135deg, #90caf9, #42a5f5)',
+                background: 'linear-gradient(135deg, #6D001A, #8A1733)',
                 '&:hover': {
-                  background: 'linear-gradient(135deg, #42a5f5, #1e88e5)',
+                  background: 'linear-gradient(135deg, #8A1733, #4A0012)',
                 },
               }}
             >

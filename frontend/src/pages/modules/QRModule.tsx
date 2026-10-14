@@ -1,5 +1,6 @@
 // pages/modules/QRModule.tsx
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { gatewayFetch } from '../../services/api';
 import {
   Box,
   Paper,
@@ -163,7 +164,7 @@ const QRModule: React.FC = () => {
 
   const analyzeQRContent = useCallback(async (content: string) => {
     try {
-      const response = await fetch('http://localhost:8001/ml/analyze/url', {
+      const response = await gatewayFetch('/ml/analyze/url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: content }),
@@ -326,7 +327,7 @@ const QRModule: React.FC = () => {
         throw new Error('No image to scan');
       }
 
-      const response = await fetch('http://localhost:8001/ml/scan/qr', {
+      const response = await gatewayFetch('/ml/scan/qr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: imageBase64, scan_type: 'base64' }),
@@ -501,7 +502,7 @@ const QRModule: React.FC = () => {
 
   return (
     <Box sx={{ p: 3, maxWidth: 1400, mx: 'auto' }}>
-      <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(26,35,50,0.8)' }}>
+      <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(23, 18, 20,0.8)' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <Avatar sx={{ bgcolor: 'primary.main', width: 56, height: 56 }}>
@@ -523,7 +524,7 @@ const QRModule: React.FC = () => {
 
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid size={{ xs: 6, sm: 3 }}>
-          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)' }}>
+          <Card sx={{ bgcolor: 'rgba(23, 18, 20,0.8)' }}>
             <CardContent sx={{ textAlign: 'center' }}>
               <Typography variant="caption" color="textSecondary">QR Codes Generated</Typography>
               <Typography variant="h4" sx={{ fontWeight: 700 }}>{totalGenerated}</Typography>
@@ -531,7 +532,7 @@ const QRModule: React.FC = () => {
           </Card>
         </Grid>
         <Grid size={{ xs: 6, sm: 3 }}>
-          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)' }}>
+          <Card sx={{ bgcolor: 'rgba(23, 18, 20,0.8)' }}>
             <CardContent sx={{ textAlign: 'center' }}>
               <Typography variant="caption" color="textSecondary">QR Codes Scanned</Typography>
               <Typography variant="h4" sx={{ fontWeight: 700 }}>{totalScanned}</Typography>
@@ -539,7 +540,7 @@ const QRModule: React.FC = () => {
           </Card>
         </Grid>
         <Grid size={{ xs: 6, sm: 3 }}>
-          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)' }}>
+          <Card sx={{ bgcolor: 'rgba(23, 18, 20,0.8)' }}>
             <CardContent sx={{ textAlign: 'center' }}>
               <Typography variant="caption" color="textSecondary">Malicious Detected</Typography>
               <Typography variant="h4" sx={{ fontWeight: 700, color: 'error.main' }}>{totalMalicious}</Typography>
@@ -547,7 +548,7 @@ const QRModule: React.FC = () => {
           </Card>
         </Grid>
         <Grid size={{ xs: 6, sm: 3 }}>
-          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)' }}>
+          <Card sx={{ bgcolor: 'rgba(23, 18, 20,0.8)' }}>
             <CardContent sx={{ textAlign: 'center' }}>
               <Typography variant="caption" color="textSecondary">Scan Success Rate</Typography>
               <Typography variant="h4" sx={{ fontWeight: 700, color: 'success.main' }}>
@@ -601,7 +602,7 @@ const QRModule: React.FC = () => {
               </Grid>
               <Button fullWidth variant="contained" onClick={handleGenerateQR} disabled={!qrData.trim()}
                 startIcon={<QrCodeIcon />}
-                sx={{ py: 1.5, background: 'linear-gradient(135deg, #90caf9, #42a5f5)' }}>
+                sx={{ py: 1.5, background: 'linear-gradient(135deg, #6D001A, #8A1733)' }}>
                 Generate QR Code
               </Button>
             </Paper>
@@ -636,7 +637,7 @@ const QRModule: React.FC = () => {
               <Typography variant="h6" gutterBottom>Scan QR Code</Typography>
 
               <Box sx={{ border: '2px dashed rgba(255,255,255,0.2)', borderRadius: 2, p: 4, mb: 3, cursor: 'pointer',
-                '&:hover': { borderColor: 'primary.main', bgcolor: 'rgba(144,202,249,0.05)' } }}
+                '&:hover': { borderColor: 'primary.light', bgcolor: 'rgba(109,0,26,0.12)' } }}
                 onClick={() => fileInputRef.current?.click()}>
                 <input type="file" ref={fileInputRef} accept="image/*" onChange={handleFileUpload} style={{ display: 'none' }} />
                 {uploadedImage ? (

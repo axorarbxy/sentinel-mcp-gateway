@@ -126,3 +126,12 @@ def test_high_sqli_rule_blocks_before_model_or_upstream(gateway_client, monkeypa
         assert json.loads(event.sqli_findings_json)[0]["field_path"] == "arguments.filter"
     finally:
         db.close()
+
+    persisted_detection_count = len(gateway.anomaly_alerts)
+    assert persisted_detection_count == 1
+    gateway.anomaly_alerts.clear()
+    gateway.restore_persisted_alerts()
+    assert len(gateway.anomaly_alerts) == persisted_detection_count
+    stats = client.get("/stats", headers=_headers(operator_token()))
+    assert stats.status_code == 200
+    assert stats.json()["anomaly_alerts"] == persisted_detection_count

@@ -97,6 +97,8 @@ async def _relay_shared_messages() -> None:
 @asynccontextmanager
 async def gateway_lifespan(_app):
     await configure_shared_state()
+    restore_behavioral_models()
+    restore_persisted_alerts()
     subscriber = asyncio.create_task(_relay_shared_messages(), name="shared-state-subscriber")
     try:
         yield
@@ -287,7 +289,7 @@ app.add_middleware(
     allow_origins=cors_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    allow_headers=["Authorization", "Content-Type", "MCP-Session-Id", "X-Request-ID"],
 )
 
 # ============ INCLUDE AUTH ROUTES ============
@@ -320,6 +322,7 @@ authentication_events = deque(maxlen=1000)
 def create_or_update_alert(
     *, agent_id: str, alert_type: str, reason: str, severity: str,
     request_data: dict, event_id: str, decision: str = "BLOCK", score=None,
+    occurred_at: datetime | None = None,
 ):
     """Correlate equivalent detections while retaining each raw request log.
 
@@ -327,7 +330,7 @@ def create_or_update_alert(
     stream. Matching agent, detection, tool and reason within five minutes are
     intentionally shown as one alert with an occurrence count.
     """
-    now = utcnow()
+    now = occurred_at or utcnow()
     method = request_data.get("method", "unknown")
     fingerprint = f"{agent_id}|{alert_type}|{method}|{reason}"
     for alert in reversed(anomaly_alerts):
@@ -373,6 +376,133 @@ def create_or_update_alert(
     }
     anomaly_alerts.append(alert)
     return alert
+
+
+def restore_persisted_alerts() -> None:
+    """Rebuild the in-memory detection view from durable MCP request events."""
+    from database import MCPRequestEvent, SessionLocal
+
+    db = SessionLocal()
+    existing_alerts = list(anomaly_alerts)
+    try:
+        events = (
+            db.query(MCPRequestEvent)
+            .filter(
+                MCPRequestEvent.decision.in_(("block", "flag")),
+                MCPRequestEvent.sqli_findings_json != "[]",
+            )
+            .order_by(MCPRequestEvent.timestamp.asc(), MCPRequestEvent.id.asc())
+            .all()
+        )
+        anomaly_alerts.clear()
+        for event in events:
+            try:
+                findings = json.loads(event.sqli_findings_json or "[]")
+            except (TypeError, ValueError):
+                logger.warning("Skipping persisted detection with invalid findings event_id=%s", event.event_id)
+                continue
+            if not isinstance(findings, list) or not findings:
+                continue
+
+            indicator_ids = list(dict.fromkeys(
+                item.get("id", "SQLI-UNKNOWN")
+                for item in findings
+                if isinstance(item, dict)
+            ))
+            if not indicator_ids:
+                continue
+            reason = "SQL injection indicators: " + ", ".join(indicator_ids[:4])
+            severity_order = {"low": 1, "medium": 2, "high": 3}
+            severity = max(
+                (str(item.get("severity", "low")).lower() for item in findings if isinstance(item, dict)),
+                key=lambda value: severity_order.get(value, 0),
+                default="low",
+            ).upper()
+            request_data = {
+                "method": event.method,
+                "tool_name": event.tool_name,
+                "sqli_findings": findings,
+                "decision_source": event.decision_source,
+            }
+            alert = create_or_update_alert(
+                agent_id=event.agent_name,
+                alert_type="rule_based",
+                reason=reason,
+                severity=severity,
+                request_data=request_data,
+                event_id=event.event_id,
+                decision=event.decision.upper(),
+                occurred_at=event.timestamp,
+            )
+            alert["rule_id"] = indicator_ids[0]
+            alert["risk"]["rule_score"] = max(
+                alert["risk"]["rule_score"],
+                round(float(event.rule_risk_score or 0.0) * 100),
+            )
+            alert["risk"]["score"] = max(alert["risk"]["score"], alert["risk"]["rule_score"])
+            alert["evidence"]["rule"] = alert["rule_id"]
+            alert["evidence"]["sqli_findings"] = findings
+            alert["evidence"]["explanation"] = reason
+        logger.info("Restored %s security detection alerts from persisted MCP events", len(anomaly_alerts))
+    except Exception:
+        anomaly_alerts.clear()
+        anomaly_alerts.extend(existing_alerts)
+        logger.exception("Failed to restore persisted security detection alerts")
+    finally:
+        db.close()
+
+
+def restore_behavioral_models() -> None:
+    """Rebuild per-agent Isolation Forests from the retained request history."""
+    from database import MCPRequestEvent, SessionLocal
+
+    behavioral_monitor.history.clear()
+    behavioral_monitor.feature_history.clear()
+    behavioral_monitor.models.clear()
+    behavioral_monitor.scalers.clear()
+    behavioral_monitor.alerts.clear()
+    behavioral_monitor.total_requests = 0
+    behavioral_monitor.anomalies_detected = 0
+    db = SessionLocal()
+    try:
+        agent_ids = [
+            agent_id
+            for (agent_id,) in db.query(MCPRequestEvent.agent_id).distinct().all()
+        ]
+        for agent_id in agent_ids:
+            persisted_events = (
+                db.query(MCPRequestEvent)
+                .filter(MCPRequestEvent.agent_id == agent_id)
+                .order_by(MCPRequestEvent.timestamp.desc(), MCPRequestEvent.id.desc())
+                .limit(behavioral_monitor.window_size)
+                .all()
+            )
+            for event in reversed(persisted_events):
+                try:
+                    payload = json.loads(event.payload_json or "{}")
+                except (TypeError, ValueError):
+                    payload = {}
+                arguments = payload.get("arguments", {}) if isinstance(payload, dict) else {}
+                arguments = arguments if isinstance(arguments, dict) else {}
+                params = {
+                    key: arguments[key]
+                    for key in ("path", "command", "sql")
+                    if key in arguments
+                }
+                behavioral_monitor.add_request(
+                    str(agent_id),
+                    {
+                        "timestamp": event.timestamp.isoformat(),
+                        "method": event.method,
+                        "params": params,
+                    },
+                )
+        logger.info("Restored %s behavioral models from persisted MCP events", len(behavioral_monitor.models))
+    except Exception:
+        logger.exception("Failed to restore behavioral models from persisted MCP events")
+        raise
+    finally:
+        db.close()
 
 
 def performance_snapshot():
@@ -814,9 +944,46 @@ async def mcp_proxy(request: Request):
                     "upstream_server", "tool_name", "arguments", "resource_uri", "prompt_name",
                     "decision", "decision_reason", "matched_rule_ids", "latency_ms",
                     "response_status", "response_size_bytes", "source_ip", "payload_hash", "payload",
+                    "rule_risk_score", "decision_source", "sqli_findings", "ml_score",
                 )
             },
         }
+        event_arguments = event.get("arguments")
+        behavioral_params = {
+            key: value
+            for key, value in (event_arguments.items() if isinstance(event_arguments, dict) else [])
+            if key in {"path", "command", "sql"}
+        }
+        behavioral_anomaly, _ = behavioral_monitor.add_request(
+            str(agent_info["agent_id"]),
+            {
+                "timestamp": event["timestamp"],
+                "method": event["method"],
+                "params": behavioral_params,
+            },
+        )
+        safe_event["data"]["ml_anomaly"] = behavioral_anomaly
+        if behavioral_anomaly:
+            from database import MCPRequestEvent, SessionLocal
+
+            db = SessionLocal()
+            try:
+                persisted_event = db.query(MCPRequestEvent).filter_by(
+                    event_id=event["event_id"],
+                ).first()
+                if persisted_event is not None:
+                    persisted_payload = json.loads(persisted_event.payload_json)
+                    persisted_payload["behavioral_anomaly"] = True
+                    persisted_event.payload_json = json.dumps(persisted_payload, ensure_ascii=False)
+                    db.commit()
+            except Exception:
+                db.rollback()
+                logger.exception(
+                    "Failed to persist behavioral anomaly event_id=%s",
+                    event["event_id"],
+                )
+            finally:
+                db.close()
         payload_data = event.get("payload", {})
         sqli_analysis = payload_data.get("sqli_analysis", {}) if isinstance(payload_data, dict) else {}
         sqli_findings = sqli_analysis.get("findings", []) if isinstance(sqli_analysis, dict) else []
@@ -901,8 +1068,10 @@ async def list_mcp_events(
         events = query.order_by(MCPRequestEvent.timestamp.desc(), MCPRequestEvent.id.desc()).limit(
             max(1, min(limit, 500))
         ).all()
-        return {"events": [
-            {
+        serialized_events = []
+        for event in events:
+            payload = json.loads(event.payload_json)
+            serialized_events.append({
                 "schema_version": event.schema_version,
                 "event_id": event.event_id,
                 "timestamp": event.timestamp.isoformat() + "Z",
@@ -925,10 +1094,13 @@ async def list_mcp_events(
                 "response_size_bytes": event.response_size_bytes,
                 "source_ip": event.source_ip,
                 "payload_hash": event.payload_hash,
-                "payload": json.loads(event.payload_json),
-            }
-            for event in events
-        ]}
+                "payload": payload,
+                "rule_risk_score": event.rule_risk_score,
+                "decision_source": event.decision_source,
+                "ml_anomaly": payload.get("behavioral_anomaly", False),
+                "ml_score": payload.get("ml_score"),
+            })
+        return {"events": serialized_events}
     finally:
         db.close()
 
@@ -1008,13 +1180,26 @@ async def cybereye_analyze(request: Request):
             "available_types": ["url", "file", "network", "user", "android", "password", "qr"]
         }
 
-    results = cybereye.analyze(input_type, input_data)
+    if input_type == "file" and isinstance(input_data, dict):
+        content = input_data.get("content")
+        if isinstance(content, str) and len(content.encode("utf-8")) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="File content exceeds the 10 MB scan limit")
 
-    return {
+    results = cybereye.analyze(input_type, input_data)
+    response = {
         "input_type": input_type,
         "results": results,
         "risk_score": cybereye.get_risk_score()
     }
+    if input_type == "password":
+        password_analyzer = cybereye.modules.get("PasswordAnalyzer")
+        if password_analyzer is None:
+            raise HTTPException(status_code=503, detail="Password analysis module is unavailable")
+        password_analysis = password_analyzer.assess_password(input_data)
+        response["risk_score"] = password_analysis["risk_score"]
+        response["analysis"] = password_analysis
+
+    return response
 
 
 @app.get("/cybereye/events", tags=["CyberEye"])
@@ -1172,48 +1357,135 @@ async def get_system_events(limit: int = 50):
 
 @app.get("/stats", tags=["Monitoring"])
 async def get_stats():
-    total = len(request_log)
-    blocked = len(blocked_requests)
-
-    method_counts = {}
-    for log in request_log:
-        method = log.get("method", "unknown")
-        method_counts[method] = method_counts.get(method, 0) + 1
-
+    from sqlalchemy import case, func
     sqli_blocks_by_hour = {}
     sqli_block_count = 0
-    try:
-        from database import MCPRequestEvent, SessionLocal
+    from database import MCPRequestEvent, SessionLocal
 
-        now = utcnow().astimezone(timezone.utc)
-        start = (now - timedelta(hours=24)).replace(tzinfo=None)
-        db = SessionLocal()
-        try:
-            events = db.query(MCPRequestEvent).filter(
-                MCPRequestEvent.timestamp >= start,
-                MCPRequestEvent.decision == "block",
-                MCPRequestEvent.matched_rule_ids.like("%SQLI-%"),
-            ).order_by(MCPRequestEvent.timestamp.asc()).limit(10_000).all()
-            for event in events:
-                try:
-                    rule_ids = json.loads(event.matched_rule_ids or "[]")
-                except (TypeError, ValueError):
-                    rule_ids = []
-                if not any(isinstance(rule_id, str) and rule_id.startswith("SQLI-") for rule_id in rule_ids):
-                    continue
-                sqli_block_count += 1
-                hour = event.timestamp.replace(minute=0, second=0, microsecond=0).isoformat() + "Z"
-                sqli_blocks_by_hour[hour] = sqli_blocks_by_hour.get(hour, 0) + 1
-        finally:
-            db.close()
-    except Exception:
-        logger.exception("Could not calculate SQLi block metrics")
+    now = utcnow().astimezone(timezone.utc)
+    start = (now - timedelta(hours=24)).replace(tzinfo=None)
+    db = SessionLocal()
+    try:
+        total = db.query(func.count(MCPRequestEvent.id)).scalar() or 0
+        blocked = db.query(func.count(MCPRequestEvent.id)).filter(
+            MCPRequestEvent.decision == "block"
+        ).scalar() or 0
+        method_counts = dict(
+            db.query(MCPRequestEvent.method, func.count(MCPRequestEvent.id))
+            .group_by(MCPRequestEvent.method)
+            .all()
+        )
+        decision_events = db.query(
+            MCPRequestEvent.decision,
+            MCPRequestEvent.matched_rule_ids,
+            MCPRequestEvent.decision_reason,
+            MCPRequestEvent.decision_source,
+            MCPRequestEvent.sqli_findings_json,
+            MCPRequestEvent.payload_json,
+        ).filter(MCPRequestEvent.decision.in_(("block", "flag"))).all()
+
+        categories = {
+            "SQL injection": 0,
+            "Path traversal": 0,
+            "Tool policy violations": 0,
+            "ML payload detections": 0,
+            "Protocol validation": 0,
+            "Behavioral anomalies": 0,
+            "Other gateway rules": 0,
+        }
+        for event in decision_events:
+            try:
+                rule_ids = json.loads(event.matched_rule_ids or "[]")
+            except (TypeError, ValueError):
+                rule_ids = []
+            rule_ids = [item for item in rule_ids if isinstance(item, str)] if isinstance(rule_ids, list) else []
+            try:
+                findings = json.loads(event.sqli_findings_json or "[]")
+            except (TypeError, ValueError):
+                findings = []
+            try:
+                payload = json.loads(event.payload_json or "{}")
+            except (TypeError, ValueError):
+                payload = {}
+            payload = payload if isinstance(payload, dict) else {}
+            reason = (event.decision_reason or "").lower()
+            categorized = False
+            if payload.get("behavioral_anomaly"):
+                categories["Behavioral anomalies"] += 1
+                categorized = True
+            if "model" in (event.decision_source or "").lower() or any(
+                rule_id.startswith("MODEL-PAYLOAD") for rule_id in rule_ids
+            ):
+                categories["ML payload detections"] += 1
+                categorized = True
+            if (isinstance(findings, list) and findings) or any(
+                rule_id.startswith("SQLI-") for rule_id in rule_ids
+            ):
+                categories["SQL injection"] += 1
+                categorized = True
+            if "PATH_TRAVERSAL" in rule_ids or any(
+                phrase in reason for phrase in ("path traversal", "sensitive path")
+            ):
+                categories["Path traversal"] += 1
+                categorized = True
+            if "BASE-ALLOWED-TOOLS" in rule_ids or any(
+                phrase in reason for phrase in ("allowed_tools", "disallowed tool")
+            ):
+                categories["Tool policy violations"] += 1
+                categorized = True
+            if any(rule_id in {
+                "BASE-METHOD-DIRECTION", "BASE-UNKNOWN-METHOD", "BASE-CONFIG-ERROR",
+                "GATEWAY-INVALID-REQUEST",
+            } for rule_id in rule_ids) or any(
+                phrase in reason for phrase in ("protocol", "malformed", "invalid json-rpc")
+            ):
+                categories["Protocol validation"] += 1
+                categorized = True
+            if not categorized:
+                categories["Other gateway rules"] += 1
+
+        traffic_hours = db.query(
+            func.strftime("%Y-%m-%dT%H:00:00Z", MCPRequestEvent.timestamp),
+            func.count(MCPRequestEvent.id),
+            func.sum(case((MCPRequestEvent.decision == "block", 1), else_=0)),
+        ).filter(
+            MCPRequestEvent.timestamp >= start,
+        ).group_by(
+            func.strftime("%Y-%m-%dT%H:00:00Z", MCPRequestEvent.timestamp),
+        ).order_by(
+            func.strftime("%Y-%m-%dT%H:00:00Z", MCPRequestEvent.timestamp),
+        ).all()
+        traffic_by_hour = [
+            {"hour": hour, "events": count, "blocked": blocked_count or 0}
+            for hour, count, blocked_count in traffic_hours
+        ]
+
+        sqli_events = db.query(
+            MCPRequestEvent.timestamp,
+            MCPRequestEvent.matched_rule_ids,
+        ).filter(
+            MCPRequestEvent.timestamp >= start,
+            MCPRequestEvent.decision == "block",
+            MCPRequestEvent.matched_rule_ids.like("%SQLI-%"),
+        ).order_by(MCPRequestEvent.timestamp.asc()).all()
+        for event in sqli_events:
+            try:
+                rule_ids = json.loads(event.matched_rule_ids or "[]")
+            except (TypeError, ValueError):
+                rule_ids = []
+            if not any(isinstance(rule_id, str) and rule_id.startswith("SQLI-") for rule_id in rule_ids):
+                continue
+            sqli_block_count += 1
+            hour = event.timestamp.replace(minute=0, second=0, microsecond=0).isoformat() + "Z"
+            sqli_blocks_by_hour[hour] = sqli_blocks_by_hour.get(hour, 0) + 1
+    finally:
+        db.close()
 
     return {
         "total_requests": total,
         "blocked": blocked,
         "block_rate": round((blocked / total * 100) if total > 0 else 0, 2),
-        "anomaly_alerts": len(anomaly_alerts),
+        "anomaly_alerts": len(decision_events),
         "system_events": len(system_events),
         "sqli_blocks_24h": sqli_block_count,
         "sqli_blocks_by_hour": [
@@ -1221,8 +1493,15 @@ async def get_stats():
             for hour, count in sorted(sqli_blocks_by_hour.items())
         ],
         "ml_models": len(behavioral_monitor.models),
+        "detection_categories": categories,
+        "traffic_by_hour": traffic_by_hour,
         "methods": method_counts,
-        "monitor_stats": behavioral_monitor.get_stats(),
+        "monitor_stats": {
+            "total_requests": total,
+            "anomalies_detected": categories["Behavioral anomalies"],
+            "agents_monitored": len(behavioral_monitor.models),
+            "total_alerts": len(decision_events),
+        },
         "performance": performance_snapshot(),
     }
 
@@ -1240,26 +1519,57 @@ async def get_agent_stats(agent_id: str):
 
 @app.get("/agents/summary", tags=["Monitoring"], summary="Agent security and behavior summaries")
 async def get_agents_summary():
-    """One consistent view of agent activity derived from retained gateway events."""
+    """Summarize persistent MCP events, falling back to legacy gateway logs."""
+    from database import MCPRequestEvent, SessionLocal
+
     summaries = {}
-    for log in request_log:
-        agent_id = log.get("agent_id", "unknown")
-        item = summaries.setdefault(agent_id, {
-            "agent_id": agent_id, "requests": 0, "blocked": 0, "anomalies": 0,
-            "tools": {}, "last_seen": None, "recent_events": [],
-        })
-        item["requests"] += 1
-        is_blocked = not log.get("policy_allowed", False) or log.get("analysis_anomaly") or log.get("ml_anomaly")
-        item["blocked"] += int(is_blocked)
-        item["anomalies"] += int(log.get("analysis_anomaly", False) or log.get("ml_anomaly", False))
-        method = log.get("method", "unknown")
-        item["tools"][method] = item["tools"].get(method, 0) + 1
-        item["last_seen"] = log.get("timestamp")
-        item["recent_events"].append(log)
+    db = SessionLocal()
+    try:
+        events = db.query(MCPRequestEvent).order_by(
+            MCPRequestEvent.timestamp.asc(), MCPRequestEvent.id.asc()
+        ).all()
+        for event in events:
+            agent_id = str(event.agent_id)
+            item = summaries.setdefault(agent_id, {
+                "agent_id": agent_id, "requests": 0, "blocked": 0, "anomalies": 0,
+                "tools": {}, "last_seen": None, "recent_events": [],
+            })
+            item["requests"] += 1
+            item["blocked"] += int(event.decision in {"block", "flag"})
+            try:
+                payload = json.loads(event.payload_json or "{}")
+            except (TypeError, ValueError):
+                payload = {}
+            anomaly = bool(payload.get("behavioral_anomaly") or payload.get("analysis_anomaly"))
+            item["anomalies"] += int(anomaly)
+            method = event.tool_name or event.method or "unknown"
+            item["tools"][method] = item["tools"].get(method, 0) + 1
+            item["last_seen"] = event.timestamp.isoformat() + "Z"
+    finally:
+        db.close()
+
+    # Legacy request telemetry is still useful for agents that have not yet
+    # sent MCP traffic through the persisted interception pipeline.
+    if not summaries:
+        for log in request_log:
+            agent_id = str(log.get("agent_id", "unknown"))
+            item = summaries.setdefault(agent_id, {
+                "agent_id": agent_id, "requests": 0, "blocked": 0, "anomalies": 0,
+                "tools": {}, "last_seen": None, "recent_events": [],
+            })
+            item["requests"] += 1
+            item["blocked"] += int(
+                not bool(log.get("policy_allowed", False))
+                or bool(log.get("analysis_anomaly"))
+                or bool(log.get("ml_anomaly"))
+            )
+            item["anomalies"] += int(bool(log.get("analysis_anomaly") or log.get("ml_anomaly")))
+            method = log.get("method", "unknown")
+            item["tools"][method] = item["tools"].get(method, 0) + 1
+            item["last_seen"] = log.get("timestamp")
 
     agents = []
     for item in summaries.values():
-        item["recent_events"] = item["recent_events"][-10:]
         blocked_rate = item["blocked"] / item["requests"] if item["requests"] else 0
         risk_score = min(100, round(item["anomalies"] * 25 + blocked_rate * 45 + min(len(item["tools"]), 10) * 2))
         item["risk_score"] = risk_score
@@ -1328,19 +1638,19 @@ async def root():
 
 
 if __name__ == "__main__":
-    print("🚀 Starting Sentinel-MCP Gateway v2.0")
-    print("🔒 Security Policies: ENABLED")
-    print("🧠 ML Anomaly Detection: ENABLED")
-    print("🛡️ CyberEye Modules: ENABLED")
+    print("Starting Sentinel-MCP Gateway v2.0")
+    print("Security Policies: ENABLED")
+    print("ML Anomaly Detection: ENABLED")
+    print("CyberEye Modules: ENABLED")
     print(f"   - {len(cybereye.modules)} modules loaded")
-    print("🔐 Authentication: ENABLED")
-    print("🎛️ MCP Management: ENABLED")
-    print("🔑 API Key Auth: ENABLED (for /mcp/proxy)")
-    print("📡 WebSocket Live Traffic: ENABLED")
-    print("🤖 ML QR Scanner: ENABLED")
-    print("📡 Listening on http://localhost:8001")
+    print("Authentication: ENABLED")
+    print("MCP Management: ENABLED")
+    print("API Key Auth: ENABLED (for /mcp/proxy)")
+    print("WebSocket Live Traffic: ENABLED")
+    print("ML QR Scanner: ENABLED")
+    print("Listening on http://localhost:8001")
     print("")
-    print("💡 Implements:")
+    print("Implements:")
     print("   - SECUREVENT (arXiv 2606.01741) hybrid approach")
     print("   - CyberEye 11-module security platform")
     print("   - Rule-based policies (layer 1)")

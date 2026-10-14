@@ -51,6 +51,7 @@ import {
   Lock as LockIcon,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
+import useLiveTraffic, { TrafficEvent } from '../hooks/useLiveTraffic';
 
 const API_URL = 'http://localhost:8001';
 
@@ -74,24 +75,15 @@ interface MCPAgent {
   last_seen_at: string | null;
 }
 
-interface LogEntry {
-  timestamp: string;
-  agent_id: string;
-  method: string;
-  params: any;
-  policy_allowed: boolean;
-  policy_reason: string;
-  ml_anomaly: boolean;
-}
-
 // ============ MAIN COMPONENT ============
 const MCPAgentDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [agent, setAgent] = useState<MCPAgent | null>(null);
-  const [agentLogs, setAgentLogs] = useState<LogEntry[]>([]);
+  const [agentLogs, setAgentLogs] = useState<TrafficEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [tabValue, setTabValue] = useState(0);
+  const { connected: eventsConnected, events: liveEvents } = useLiveTraffic({ enabled: true, maxEvents: 100 });
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: '',
@@ -107,9 +99,9 @@ const MCPAgentDetail: React.FC = () => {
     try {
       const token = localStorage.getItem('access_token');
       const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-      const [agentRes, logsRes] = await Promise.all([
+      const [agentRes, eventsRes] = await Promise.all([
         fetch(`${API_URL}/mcp/agents/${id}`, { headers }),
-        fetch(`${API_URL}/logs?limit=200`, { headers }),
+        fetch(`${API_URL}/mcp/events?agent_id=${encodeURIComponent(id || '')}&limit=50`, { headers }),
       ]);
 
       if (agentRes.ok) {
@@ -117,14 +109,18 @@ const MCPAgentDetail: React.FC = () => {
       } else if (agentRes.status === 404) {
         showSnackbar('Agent not found', 'error');
         setTimeout(() => navigate('/mcp'), 2000);
+      } else if (agentRes.status === 403) {
+        showSnackbar('Your account needs gateway:admin access to view agent details', 'error');
       }
 
-      if (logsRes.ok) {
-        const data = await logsRes.json();
-        const filtered = (data.logs || []).filter(
-          (log: LogEntry) => log.agent_id === `agent-${id}` || log.agent_id === String(id)
-        );
-        setAgentLogs(filtered.slice(0, 50));
+      if (eventsRes.ok) {
+        const data = await eventsRes.json();
+        setAgentLogs(Array.isArray(data.events) ? data.events : []);
+      } else if (eventsRes.status === 403) {
+        showSnackbar('Your account needs gateway:admin access to view agent events', 'error');
+      } else {
+        const data = await eventsRes.json().catch(() => ({}));
+        throw new Error(data.detail || `Failed to fetch agent events (${eventsRes.status})`);
       }
     } catch (error) {
       console.error('Fetch error:', error);
@@ -139,6 +135,17 @@ const MCPAgentDetail: React.FC = () => {
     const interval = setInterval(fetchAgent, 10000);
     return () => clearInterval(interval);
   }, [fetchAgent]);
+
+  useEffect(() => {
+    const matchingEvents = liveEvents.filter((event) => String(event.agent_id) === id);
+    if (matchingEvents.length === 0) return;
+    setAgentLogs((current) => {
+      const knownIds = new Set(current.map((event) => event.event_id));
+      return [...matchingEvents.filter((event) => !knownIds.has(event.event_id)), ...current]
+        .slice(0, 50);
+    });
+    fetchAgent();
+  }, [id, liveEvents, fetchAgent]);
 
   // ============ ACTIONS ============
   const handleToggle = async () => {
@@ -316,7 +323,7 @@ print(response.json())` : '';
       {/* ============ KPI CARDS ============ */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(144,202,249,0.15)' }}>
+          <Card sx={{ bgcolor: 'rgba(23,18,20,0.8)', border: '1px solid rgba(213,107,130,0.18)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                 <SpeedIcon color="primary" />
@@ -335,7 +342,7 @@ print(response.json())` : '';
         </Grid>
 
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(76,175,80,0.15)' }}>
+          <Card sx={{ bgcolor: 'rgba(23, 18, 20,0.8)', border: '1px solid rgba(76,175,80,0.15)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                 <CheckCircleIcon sx={{ color: '#4caf50' }} />
@@ -356,7 +363,7 @@ print(response.json())` : '';
         </Grid>
 
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(244,67,54,0.15)' }}>
+          <Card sx={{ bgcolor: 'rgba(23, 18, 20,0.8)', border: '1px solid rgba(244,67,54,0.15)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                 <BlockIcon sx={{ color: '#f44336' }} />
@@ -375,7 +382,7 @@ print(response.json())` : '';
         </Grid>
 
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(255,152,0,0.15)' }}>
+          <Card sx={{ bgcolor: 'rgba(23, 18, 20,0.8)', border: '1px solid rgba(255,152,0,0.15)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                 <SecurityIcon sx={{ color: '#ff9800' }} />
@@ -395,7 +402,7 @@ print(response.json())` : '';
       </Grid>
 
       {/* ============ API KEY ============ */}
-      <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(144,202,249,0.15)' }}>
+      <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(23,18,20,0.8)', border: '1px solid rgba(213,107,130,0.18)' }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <KeyIcon color="primary" />
@@ -412,7 +419,7 @@ print(response.json())` : '';
             fontFamily: 'monospace',
             fontSize: '0.85rem',
             wordBreak: 'break-all',
-            color: '#90caf9',
+            color: '#D56B82',
           }}
         >
           {agent.credential_prefix || 'No credential prefix available'}
@@ -435,11 +442,14 @@ print(response.json())` : '';
       {tabValue === 0 && (
         <Paper sx={{ p: 3 }}>
           <Typography variant="h6" gutterBottom>
-            Recent Requests
+            Recent Agent Events
           </Typography>
-          <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 2 }}>
-            Last 50 requests from this agent
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+            <Chip size="small" label={eventsConnected ? 'LIVE' : 'RECONNECTING'} color={eventsConnected ? 'success' : 'warning'} />
+            <Typography variant="caption" color="textSecondary">
+              Showing the latest 50 persisted and live events for this agent
+            </Typography>
+          </Box>
           <Divider sx={{ mb: 2 }} />
 
           {agentLogs.length === 0 ? (
@@ -449,7 +459,7 @@ print(response.json())` : '';
                 No activity yet
               </Typography>
               <Typography variant="body2" color="textSecondary">
-                Requests from this agent will appear here
+                Send an MCP request using this agent’s API key; its events will appear here.
               </Typography>
             </Box>
           ) : (
@@ -458,44 +468,47 @@ print(response.json())` : '';
                 <TableHead>
                   <TableRow>
                     <TableCell>Time</TableCell>
-                    <TableCell>Method</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell>Reason</TableCell>
-                    <TableCell>ML Anomaly</TableCell>
+                    <TableCell>Request</TableCell>
+                    <TableCell>Decision</TableCell>
+                    <TableCell>Policy reason</TableCell>
+                    <TableCell align="right">Latency</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {agentLogs.map((log, index) => (
-                    <TableRow key={index} hover>
+                  {agentLogs.map((event) => (
+                    <TableRow key={event.event_id} hover>
                       <TableCell>
                         <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
-                          {new Date(log.timestamp).toLocaleString()}
+                          {new Date(event.timestamp).toLocaleString()}
                         </Typography>
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                          {log.method}
+                          {event.tool_name || event.method}
                         </Typography>
+                        {event.tool_name && (
+                          <Typography variant="caption" color="textSecondary">
+                            {event.method}
+                          </Typography>
+                        )}
                       </TableCell>
                       <TableCell>
                         <Chip
                           size="small"
-                          label={log.policy_allowed ? 'Allowed' : 'Blocked'}
-                          color={log.policy_allowed ? 'success' : 'error'}
+                          label={event.decision.toUpperCase()}
+                          color={event.decision === 'block' ? 'error' : event.decision === 'flag' ? 'warning' : 'success'}
                         />
                       </TableCell>
                       <TableCell>
                         <Typography variant="caption" noWrap sx={{ maxWidth: 300, display: 'block' }}>
-                          {log.policy_reason}
+                          {event.decision_reason || 'No policy reason reported'}
+                        </Typography>
+                        <Typography variant="caption" color="textSecondary">
+                          ML {event.ml_score === null ? 'n/a' : `${(event.ml_score * 100).toFixed(1)}%`} · Rule {event.rule_risk_score === null ? 'n/a' : `${(event.rule_risk_score * 100).toFixed(1)}%`}
                         </Typography>
                       </TableCell>
-                      <TableCell>
-                        <Chip
-                          size="small"
-                          label={log.ml_anomaly ? 'ANOMALY' : 'Normal'}
-                          color={log.ml_anomaly ? 'warning' : 'default'}
-                          variant={log.ml_anomaly ? 'filled' : 'outlined'}
-                        />
+                      <TableCell align="right">
+                        {event.latency_ms === null ? '—' : `${event.latency_ms.toFixed(1)} ms`}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -663,7 +676,7 @@ print(response.json())` : '';
                   fontSize: '0.75rem',
                   overflow: 'auto',
                   maxHeight: 400,
-                  color: '#90caf9',
+                  color: '#D56B82',
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-all',
                 }}
@@ -700,7 +713,7 @@ print(response.json())` : '';
                   fontSize: '0.75rem',
                   overflow: 'auto',
                   maxHeight: 400,
-                  color: '#90caf9',
+                  color: '#D56B82',
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-all',
                 }}
@@ -712,7 +725,7 @@ print(response.json())` : '';
 
           {/* Integration Notes */}
           <Grid size={{ xs: 12 }}>
-            <Paper sx={{ p: 3, bgcolor: 'rgba(26,35,50,0.8)' }}>
+            <Paper sx={{ p: 3, bgcolor: 'rgba(23, 18, 20,0.8)' }}>
               <Typography variant="h6" gutterBottom>
                 🔒 Authentication Notes
               </Typography>

@@ -215,12 +215,14 @@ cd frontend
 npm install
 npm start
 
-\# Example: register a read-only operator account, then sign in
+\# Example: register a demo admin account, then sign in
 curl -X POST http://localhost:8001/auth/register -H "Content-Type: application/json" -d '{"username":"ops","email":"ops@example.com","password":"StrongPass123","full_name":"Ops"}'
 curl -X POST http://localhost:8001/auth/login -H "Content-Type: application/json" -d '{"username_or_email":"ops","password":"StrongPass123"}'
 
-\# Registration does not grant gateway:admin; provision an administrator separately.
-\# Use the returned access_token for read-authorized control-plane endpoints.
+\# Demo registration creates an admin-capable account for local use.
+\# Existing local demo accounts are promoted after a successful login.
+\# Production registrations remain read-only unless separately provisioned.
+\# Use the returned access_token for gateway:admin control-plane endpoints.
 ```
 
 ## Agent API key authentication
@@ -385,6 +387,13 @@ curl -H "Authorization: Bearer <operator-access-token>" \
 The same redacted event is sent through the existing live WebSocket event
 channel as `mcp_event`. Persistence or live-feed failures are logged without
 including payload data; they do not change the policy decision.
+
+For local development, SQLite stores the event history and agent records in
+`database/sentinel_mcp.db`. The default path is anchored to the project files,
+so stopping and restarting the gateway (even from another working directory)
+continues to use the same database. Keep that file when preserving local data;
+set `DATABASE_URL` only when intentionally selecting a different persistent
+database.
 
 | Condition | Gateway behavior |
 | --- | --- |

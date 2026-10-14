@@ -1,7 +1,7 @@
 // App.tsx
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { ThemeProvider, createTheme, CssBaseline, AppBar, Toolbar, Typography, Tabs, Tab, Box } from '@mui/material';
+import { ThemeProvider, createTheme, CssBaseline, AppBar, Toolbar, Typography, Tabs, Tab, Box, Button } from '@mui/material';
 import {
   Dashboard as DashboardIcon,
   Warning as WarningIcon,
@@ -9,7 +9,9 @@ import {
   Security as SecurityIcon,
   Storage as StorageIcon,
   Rule as PolicyIcon,
+  Logout as LogoutIcon,
 } from '@mui/icons-material';
+import { logout } from './services/api';
 import Dashboard from './components/Dashboard';
 import AlertsPage from './pages/Alerts';
 import AgentDetailsPage from './pages/AgentDetails';
@@ -36,9 +38,34 @@ import SQLiPolicies from './pages/SQLiPolicies';
 const darkTheme = createTheme({
   palette: {
     mode: 'dark',
-    primary: { main: '#90caf9' },
-    secondary: { main: '#f48fb1' },
-    background: { default: '#0a1929', paper: '#1a2332' },
+    primary: { main: '#6D001A', light: '#D56B82', dark: '#4A0012', contrastText: '#FFFFFF' },
+    secondary: { main: '#FFFFFF', contrastText: '#6D001A' },
+    background: { default: '#080808', paper: '#171214' },
+    text: { primary: '#FFFFFF', secondary: 'rgba(255, 255, 255, 0.72)' },
+  },
+  components: {
+    MuiLink: {
+      styleOverrides: {
+        root: { color: '#D56B82' },
+      },
+    },
+    MuiTab: {
+      styleOverrides: {
+        root: {
+          '&.Mui-selected': { color: '#D56B82' },
+        },
+      },
+    },
+    MuiButton: {
+      styleOverrides: {
+        outlined: { color: '#D56B82', borderColor: 'rgba(213, 107, 130, 0.55)' },
+      },
+    },
+    MuiSvgIcon: {
+      styleOverrides: {
+        colorPrimary: { color: '#D56B82' },
+      },
+    },
   },
 });
 
@@ -143,6 +170,11 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   const statusConfig = getStatusConfig();
 
+  const handleLogout = () => {
+    logout();
+    navigate('/login', { replace: true });
+  };
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <AppBar
@@ -164,11 +196,13 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
               display: 'flex',
               alignItems: 'center',
               gap: 1,
-              '&:hover': { color: 'primary.main' },
+              color: 'primary.light',
+              '&:hover': { color: 'secondary.main' },
             }}
             onClick={() => navigate('/dashboard', { replace: true })}
           >
-            🛡️ Sentinel-MCP
+            <SecurityIcon sx={{ color: 'primary.light' }} />
+            Sentinel-MCP
           </Typography>
 
           <Tabs value={tabValue} onChange={handleTabChange} textColor="primary" indicatorColor="primary">
@@ -222,6 +256,19 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             <Typography variant="caption" color="textSecondary" sx={{ fontWeight: 600 }}>
               v2.0
             </Typography>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<LogoutIcon />}
+              onClick={handleLogout}
+              sx={{
+                color: 'text.primary',
+                borderColor: 'rgba(255,255,255,0.2)',
+                '&:hover': { borderColor: 'primary.light', backgroundColor: 'rgba(255,255,255,0.04)' },
+              }}
+            >
+              Sign out
+            </Button>
           </Box>
         </Toolbar>
       </AppBar>

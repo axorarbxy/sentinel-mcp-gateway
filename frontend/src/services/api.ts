@@ -32,6 +32,20 @@ export const logout = () => {
   window.dispatchEvent(new Event('auth:logout'));
 };
 
+export const gatewayFetch = async (path: string, init: RequestInit = {}): Promise<Response> => {
+  const headers = new Headers(init.headers);
+  const token = localStorage.getItem('access_token');
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  if (response.status === 401) {
+    logout();
+  }
+  return response;
+};
+
 // If the backend ever rejects our token (expired/revoked), log out
 // automatically instead of leaving the UI stuck in a broken state.
 api.interceptors.response.use(

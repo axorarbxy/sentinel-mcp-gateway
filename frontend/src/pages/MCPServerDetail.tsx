@@ -298,7 +298,7 @@ const MCPServerDetail: React.FC = () => {
       {/* KPI Cards */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(144,202,249,0.15)' }}>
+          <Card sx={{ bgcolor: 'rgba(23,18,20,0.8)', border: '1px solid rgba(213,107,130,0.18)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                 <PublicIcon color="primary" />
@@ -325,7 +325,7 @@ const MCPServerDetail: React.FC = () => {
         </Grid>
 
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: `1px solid ${healthConfig.border}` }}>
+          <Card sx={{ bgcolor: 'rgba(23, 18, 20,0.8)', border: `1px solid ${healthConfig.border}` }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                 {getHealthIcon(server.health_status)}
@@ -341,7 +341,7 @@ const MCPServerDetail: React.FC = () => {
         </Grid>
 
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(255,152,0,0.15)' }}>
+          <Card sx={{ bgcolor: 'rgba(23, 18, 20,0.8)', border: '1px solid rgba(255,152,0,0.15)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                 {getServerTypeIcon(server.server_type)}
@@ -357,7 +357,7 @@ const MCPServerDetail: React.FC = () => {
         </Grid>
 
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(76,175,80,0.15)' }}>
+          <Card sx={{ bgcolor: 'rgba(23, 18, 20,0.8)', border: '1px solid rgba(76,175,80,0.15)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                 <TimelineIcon sx={{ color: '#4caf50' }} />
@@ -460,7 +460,7 @@ const MCPServerDetail: React.FC = () => {
                   fontFamily: 'monospace',
                   fontSize: '0.85rem',
                   wordBreak: 'break-all',
-                  color: '#90caf9',
+                  color: '#D56B82',
                   mt: 1,
                 }}
               >
@@ -480,7 +480,7 @@ const MCPServerDetail: React.FC = () => {
                   fontFamily: 'monospace',
                   fontSize: '0.85rem',
                   wordBreak: 'break-all',
-                  color: '#90caf9',
+                  color: '#D56B82',
                   mt: 1,
                 }}
               >

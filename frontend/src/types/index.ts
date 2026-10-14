@@ -22,6 +22,8 @@ export interface StatsResponse {
   system_events?: number;
   sqli_blocks_24h?: number;
   sqli_blocks_by_hour?: { hour: string; blocks: number }[];
+  detection_categories: Record<string, number>;
+  traffic_by_hour: { hour: string; events: number; blocked: number }[];
   ml_models: number;
   methods: Record<string, number>;
   monitor_stats: {

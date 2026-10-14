@@ -1,5 +1,6 @@
 // pages/modules/PhishingModule.tsx
 import React, { useState } from 'react';
+import { gatewayFetch } from '../../services/api';
 import {
   Box,
   Paper,
@@ -195,7 +196,7 @@ const PhishingModule: React.FC = () => {
     simulateAnalysisSteps();
 
     try {
-      const response = await fetch('http://localhost:8001/ml/analyze/url', {
+      const response = await gatewayFetch('/ml/analyze/url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: url }),
@@ -442,7 +443,7 @@ Timestamp: ${result.metadata.timestamp}`;
     if (!result) return;
 
     try {
-      const response = await fetch('http://localhost:8001/ml/feedback', {
+      const response = await gatewayFetch('/ml/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -476,7 +477,7 @@ Timestamp: ${result.metadata.timestamp}`;
 
     setIsReporting(true);
     try {
-      const response = await fetch('http://localhost:8001/ml/report-threat', {
+      const response = await gatewayFetch('/ml/report-threat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -547,7 +548,7 @@ Timestamp: ${result.metadata.timestamp}`;
   return (
     <Box sx={{ p: 3, maxWidth: 1400, mx: 'auto' }}>
       {/* HERO */}
-      <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(255,255,255,0.05)' }}>
+      <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(23, 18, 20,0.8)', border: '1px solid rgba(255,255,255,0.05)' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
           <Box sx={{ fontSize: 48 }}>🔗</Box>
           <Box>
@@ -570,7 +571,7 @@ Timestamp: ${result.metadata.timestamp}`;
       </Paper>
 
       {/* URL INPUT */}
-      <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(26,35,50,0.8)' }}>
+      <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(23, 18, 20,0.8)' }}>
         <Typography variant="h6" gutterBottom>Analyze a URL</Typography>
         <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <TextField
@@ -600,8 +601,8 @@ Timestamp: ${result.metadata.timestamp}`;
             sx={{
               minWidth: 160,
               py: 1.75,
-              background: 'linear-gradient(135deg, #90caf9, #42a5f5)',
-              '&:hover': { background: 'linear-gradient(135deg, #42a5f5, #1e88e5)' },
+              background: 'linear-gradient(135deg, #6D001A, #8A1733)',
+              '&:hover': { background: 'linear-gradient(135deg, #8A1733, #4A0012)' },
             }}
           >
             {isAnalyzing ? <CircularProgress size={24} color="inherit" /> : 'ANALYZE URL'}
@@ -631,7 +632,7 @@ Timestamp: ${result.metadata.timestamp}`;
 
       {/* LOADING */}
       {isAnalyzing && (
-        <Paper sx={{ p: 4, mb: 3, bgcolor: 'rgba(26,35,50,0.8)', textAlign: 'center' }}>
+        <Paper sx={{ p: 4, mb: 3, bgcolor: 'rgba(23, 18, 20,0.8)', textAlign: 'center' }}>
           <CircularProgress size={60} sx={{ mb: 2 }} />
           <Typography variant="h6" gutterBottom>Analyzing URL...</Typography>
           <Box sx={{ maxWidth: 500, mx: 'auto', textAlign: 'left', mt: 3 }}>
@@ -681,7 +682,7 @@ Timestamp: ${result.metadata.timestamp}`;
             sx={{
               p: 4,
               mb: 3,
-              bgcolor: 'rgba(26,35,50,0.95)',
+              bgcolor: 'rgba(23, 18, 20,0.95)',
               border: `2px solid ${getVerdictColor(result.verdict)}`,
               textAlign: 'center',
             }}
@@ -737,7 +738,7 @@ Timestamp: ${result.metadata.timestamp}`;
           {/* Analysis + Domain Intel */}
           <Grid container spacing={3} sx={{ mb: 3 }}>
             <Grid size={{ xs: 12, md: 6 }}>
-              <Paper sx={{ p: 3, bgcolor: 'rgba(26,35,50,0.8)', height: '100%' }}>
+              <Paper sx={{ p: 3, bgcolor: 'rgba(23, 18, 20,0.8)', height: '100%' }}>
                 <Typography variant="h6" gutterBottom>🔍 Security Signals</Typography>
                 <Divider sx={{ mb: 2 }} />
                 {Object.entries(result.analysis).map(([key, value]) => (
@@ -760,7 +761,7 @@ Timestamp: ${result.metadata.timestamp}`;
             </Grid>
 
             <Grid size={{ xs: 12, md: 6 }}>
-              <Paper sx={{ p: 3, bgcolor: 'rgba(26,35,50,0.8)', height: '100%' }}>
+              <Paper sx={{ p: 3, bgcolor: 'rgba(23, 18, 20,0.8)', height: '100%' }}>
                 <Typography variant="h6" gutterBottom>🌐 Domain Intelligence</Typography>
                 <Divider sx={{ mb: 2 }} />
                 <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
@@ -798,7 +799,7 @@ Timestamp: ${result.metadata.timestamp}`;
           </Grid>
 
           {/* URL Anatomy */}
-          <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(26,35,50,0.8)' }}>
+          <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(23, 18, 20,0.8)' }}>
             <Typography variant="h6" gutterBottom>🔬 URL Anatomy</Typography>
             <Divider sx={{ mb: 2 }} />
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
@@ -842,7 +843,7 @@ Timestamp: ${result.metadata.timestamp}`;
           {/* Why Flagged + AI */}
           <Grid container spacing={3} sx={{ mb: 3 }}>
             <Grid size={{ xs: 12, md: 6 }}>
-              <Paper sx={{ p: 3, bgcolor: 'rgba(26,35,50,0.8)', height: '100%' }}>
+              <Paper sx={{ p: 3, bgcolor: 'rgba(23, 18, 20,0.8)', height: '100%' }}>
                 <Typography variant="h6" gutterBottom>⚠️ Why This URL Was Flagged</Typography>
                 <Divider sx={{ mb: 2 }} />
                 {result.indicators.map((indicator, idx) => (
@@ -874,7 +875,7 @@ Timestamp: ${result.metadata.timestamp}`;
             </Grid>
 
             <Grid size={{ xs: 12, md: 6 }}>
-              <Paper sx={{ p: 3, bgcolor: 'rgba(26,35,50,0.8)', height: '100%' }}>
+              <Paper sx={{ p: 3, bgcolor: 'rgba(23, 18, 20,0.8)', height: '100%' }}>
                 <Typography variant="h6" gutterBottom>🤖 AI-Generated Phishing Indicators</Typography>
                 <Divider sx={{ mb: 2 }} />
                 {Object.entries(result.aiIndicators).map(([key, value]) => (
@@ -905,7 +906,7 @@ Timestamp: ${result.metadata.timestamp}`;
           </Grid>
 
           {/* Recommended Action */}
-          <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(26,35,50,0.8)' }}>
+          <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(23, 18, 20,0.8)' }}>
             <Typography variant="h6" gutterBottom>🛡️ Recommended Action</Typography>
             <Divider sx={{ mb: 2 }} />
             <Typography variant="body1" sx={{ mb: 2 }}>{result.recommendation}</Typography>
@@ -932,7 +933,7 @@ Timestamp: ${result.metadata.timestamp}`;
           </Paper>
 
           {/* Feedback */}
-          <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(26,35,50,0.8)' }}>
+          <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(23, 18, 20,0.8)' }}>
             <Typography variant="h6" gutterBottom>Was this detection useful?</Typography>
             {!feedbackGiven ? (
               <Box sx={{ display: 'flex', gap: 2 }}>
@@ -949,7 +950,7 @@ Timestamp: ${result.metadata.timestamp}`;
           </Paper>
 
           {/* Technical Details */}
-          <Accordion sx={{ bgcolor: 'rgba(26,35,50,0.8)', mb: 3 }}>
+          <Accordion sx={{ bgcolor: 'rgba(23, 18, 20,0.8)', mb: 3 }}>
             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
               <Typography variant="h6">⚙️ Technical Details</Typography>
             </AccordionSummary>
@@ -979,7 +980,7 @@ Timestamp: ${result.metadata.timestamp}`;
 
       {/* Recent Scans */}
       {history.length > 0 && (
-        <Paper sx={{ p: 3, bgcolor: 'rgba(26,35,50,0.8)' }}>
+        <Paper sx={{ p: 3, bgcolor: 'rgba(23, 18, 20,0.8)' }}>
           <Typography variant="h6" gutterBottom>📜 Recent Scans</Typography>
           <Divider sx={{ mb: 2 }} />
           <TableContainer>

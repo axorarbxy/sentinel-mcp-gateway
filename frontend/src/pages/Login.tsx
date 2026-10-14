@@ -10,14 +10,11 @@ import {
   InputAdornment,
   IconButton,
   Paper,
-  Divider,
 } from '@mui/material';
 import {
   Visibility,
   VisibilityOff,
   Login as LoginIcon,
-  Google as GoogleIcon,
-  GitHub as GitHubIcon,
 } from '@mui/icons-material';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 
@@ -80,7 +77,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'linear-gradient(135deg, #0a1929 0%, #1a2332 100%)',
+        background: 'linear-gradient(135deg, #080808 0%, #171214 100%)',
         p: 3,
       }}
     >
@@ -91,13 +88,13 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           width: '100%',
           p: 4,
           borderRadius: 3,
-          background: 'rgba(26, 35, 50, 0.95)',
+          background: 'rgba(23, 18, 20, 0.95)',
           backdropFilter: 'blur(10px)',
           border: '1px solid rgba(255,255,255,0.05)',
         }}
       >
         <Box sx={{ textAlign: 'center', mb: 4 }}>
-          <Typography variant="h3" component="h1" sx={{ mb: 1 }}>
+          <Typography variant="h3" component="h1" sx={{ mb: 1, color: 'primary.light' }}>
             🛡️
           </Typography>
           <Typography variant="h5" component="h1" sx={{ fontWeight: 600 }}>
@@ -106,30 +103,6 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           <Typography variant="body2" color="textSecondary">
             Sign in to your Sentinel-MCP account
           </Typography>
-        </Box>
-
-        <Box sx={{ mb: 3 }}>
-          <Button
-            fullWidth
-            variant="outlined"
-            startIcon={<GoogleIcon />}
-            sx={{ mb: 1.5, py: 1.5, borderRadius: 2 }}
-          >
-            Continue with Google
-          </Button>
-          <Button
-            fullWidth
-            variant="outlined"
-            startIcon={<GitHubIcon />}
-            sx={{ py: 1.5, borderRadius: 2 }}
-          >
-            Continue with GitHub
-          </Button>
-          <Divider sx={{ my: 3 }}>
-            <Typography variant="body2" color="textSecondary">
-              OR
-            </Typography>
-          </Divider>
         </Box>
 
         {error && (
@@ -190,9 +163,9 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               py: 1.5,
               fontSize: '1rem',
               borderRadius: 2,
-              background: 'linear-gradient(135deg, #90caf9, #42a5f5)',
+              background: 'linear-gradient(135deg, #6D001A, #8A1733)',
               '&:hover': {
-                background: 'linear-gradient(135deg, #42a5f5, #1e88e5)',
+                background: 'linear-gradient(135deg, #8A1733, #4A0012)',
               },
             }}
           >

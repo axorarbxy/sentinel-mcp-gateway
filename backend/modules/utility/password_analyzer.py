@@ -5,8 +5,11 @@ Checks password entropy and patterns
 
 import re
 import math
+import logging
 from typing import Dict, Any, Optional
 from ..base_module import SecurityModule, SecurityEvent
+
+logger = logging.getLogger(__name__)
 
 class PasswordAnalyzer(SecurityModule):
     """Analyzes password strength and security"""
@@ -61,7 +64,7 @@ class PasswordAnalyzer(SecurityModule):
             if not password:
                 return None
             
-            result = self._analyze_password(password)
+            result = self.assess_password(password)
             
             if result["is_weak"]:
                 return self.generate_event(
@@ -84,8 +87,8 @@ class PasswordAnalyzer(SecurityModule):
             logger.error(f"Error analyzing password: {e}")
             return None
     
-    def _analyze_password(self, password: str) -> Dict[str, Any]:
-        """Internal password analysis"""
+    def assess_password(self, password: str) -> Dict[str, Any]:
+        """Return strength and risk metrics without the raw password."""
         issues = []
         score = 100  # Start with perfect score
         entropy = 0
@@ -163,10 +166,20 @@ class PasswordAnalyzer(SecurityModule):
         else:
             strength = "Weak"
         
+        strength_score = score / 100
+        risk_score = 1 - strength_score
+        severity = "HIGH" if risk_score >= 0.7 else "MEDIUM" if risk_score >= 0.4 else "LOW"
         return {
-            "score": score / 100,  # Normalize to 0-1
+            "score": strength_score,
+            "strength_score": strength_score,
+            "risk_score": risk_score,
             "entropy": entropy,
             "issues": issues,
             "strength": strength,
+            "severity": severity,
             "is_weak": score < 60
         }
+
+    def _analyze_password(self, password: str) -> Dict[str, Any]:
+        """Backward-compatible alias for the password assessment."""
+        return self.assess_password(password)

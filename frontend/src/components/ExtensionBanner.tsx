@@ -83,8 +83,8 @@ const ExtensionBanner: React.FC = () => {
             startIcon={<DownloadIcon />}
             onClick={handleInstallClick}
             sx={{
-              background: 'linear-gradient(135deg, #90caf9, #42a5f5)',
-              '&:hover': { background: 'linear-gradient(135deg, #42a5f5, #1e88e5)' },
+              background: 'linear-gradient(135deg, #6D001A, #8A1733)',
+              '&:hover': { background: 'linear-gradient(135deg, #8A1733, #4A0012)' },
               borderRadius: 2,
               py: 1,
               px: 3,

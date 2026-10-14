@@ -1,11 +1,14 @@
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
 
+import gateway
 import mcp_interception
 from database import MCPRequestEvent
+from monitor import BehavioralMonitor
 from test_api_key_auth import (
     add_agent,
     gateway_client,
@@ -65,10 +68,159 @@ def test_tools_list_filters_and_persists_redacted_queryable_event(gateway_client
     assert events.status_code == 200
     assert events.json()["events"][0]["method"] == "tools/list"
     assert events.json()["events"][0]["decision"] == "allow"
+    assert events.json()["events"][0]["rule_risk_score"] == 0.0
+    assert events.json()["events"][0]["decision_source"] == "rule"
+    assert events.json()["events"][0]["ml_score"] is None
     db = session_factory()
     assert db.query(MCPRequestEvent).filter_by(agent_id=agent_id, method="tools/list").count() == 1
     db.close()
     assert key not in caplog.text
+
+
+def test_proxy_traffic_trains_per_agent_behavioral_model(gateway_client, monkeypatch):
+    client, session_factory = gateway_client
+    key, _, agent_id = add_agent(session_factory)
+    monitor = BehavioralMonitor(window_size=100, contamination=0.1)
+    monkeypatch.setattr(gateway, "behavioral_monitor", monitor)
+
+    for request_id in range(20):
+        response = client.post(
+            "/mcp/proxy",
+            headers=agent_headers(key),
+            json=message(
+                "tools/call",
+                {
+                    "name": "filesystem.read",
+                    "arguments": {"path": f"/home/user/file-{request_id}.txt"},
+                },
+                request_id=request_id,
+            ),
+        )
+        assert response.status_code == 200
+
+    assert monitor.get_stats()["agents_monitored"] == 1
+    assert str(agent_id) in monitor.models
+
+
+def test_stats_and_behavioral_models_restore_from_persisted_events(gateway_client):
+    client, session_factory = gateway_client
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    db = session_factory()
+    try:
+        for index in range(20):
+            blocked = index == 0
+            db.add(MCPRequestEvent(
+                event_id=f"persisted-event-{index}",
+                timestamp=now - timedelta(minutes=19 - index),
+                agent_id=9001,
+                agent_name="persisted-agent",
+                method="tools/call",
+                decision="block" if blocked else "allow",
+                decision_reason="SQL injection indicator" if blocked else "",
+                matched_rule_ids='["SQLI-003"]' if blocked else "[]",
+                sqli_findings_json='[{"id":"SQLI-003"}]' if blocked else "[]",
+                payload_json=json.dumps({
+                    "arguments": {"path": f"/home/user/file-{index}.txt"},
+                    "behavioral_anomaly": blocked,
+                }),
+            ))
+        db.commit()
+    finally:
+        db.close()
+
+    gateway.restore_behavioral_models()
+    assert "9001" in gateway.behavioral_monitor.models
+
+    stats_response = client.get("/stats", headers=operator_headers())
+    assert stats_response.status_code == 200
+    stats = stats_response.json()
+    assert stats["total_requests"] == 20
+    assert stats["blocked"] == 1
+    assert stats["anomaly_alerts"] == 1
+    assert stats["ml_models"] == 1
+    assert stats["detection_categories"]["SQL injection"] == 1
+    assert stats["detection_categories"]["Behavioral anomalies"] == 1
+    assert sum(bucket["events"] for bucket in stats["traffic_by_hour"]) == 20
+
+
+def test_agent_request_is_pushed_to_authenticated_live_dashboard(gateway_client):
+    client, _ = gateway_client
+    key, _, agent_id = add_agent(gateway_client[1])
+    ticket_response = client.post("/auth/ws-ticket", headers=operator_headers())
+    assert ticket_response.status_code == 200
+    ticket = ticket_response.json()["ticket"]
+
+    with client.websocket_connect(
+        "/mcp/ws/traffic",
+        subprotocols=["cybereye.v1", f"cybereye-ticket.{ticket}"],
+        headers={"host": "localhost"},
+    ) as websocket:
+        assert json.loads(websocket.receive_text())["type"] == "snapshot"
+        response = client.post(
+            "/mcp/proxy",
+            headers=agent_headers(key),
+            json=message("tools/call", {"name": "shell.exec", "arguments": {}}),
+        )
+        assert response.status_code == 200
+        assert response.json()["error"]["code"] == -32000
+
+        live_message = json.loads(websocket.receive_text())
+
+    assert live_message["type"] == "mcp_event"
+    assert live_message["data"]["agent_id"] == agent_id
+    assert live_message["data"]["agent_name"] == "test-agent"
+    assert live_message["data"]["method"] == "tools/call"
+    assert live_message["data"]["decision"] == "block"
+    assert isinstance(live_message["data"]["rule_risk_score"], (float, int))
+    assert live_message["data"]["decision_source"] == "rule"
+
+
+def test_behavioral_anomaly_is_included_in_live_dashboard_event(gateway_client, monkeypatch):
+    client, session_factory = gateway_client
+    key, _, agent_id = add_agent(session_factory)
+    monkeypatch.setattr(gateway.behavioral_monitor, "add_request", lambda agent_id, request: (True, {}))
+    ticket_response = client.post("/auth/ws-ticket", headers=operator_headers())
+    assert ticket_response.status_code == 200
+    ticket = ticket_response.json()["ticket"]
+
+    with client.websocket_connect(
+        "/mcp/ws/traffic",
+        subprotocols=["cybereye.v1", f"cybereye-ticket.{ticket}"],
+        headers={"host": "localhost"},
+    ) as websocket:
+        assert json.loads(websocket.receive_text())["type"] == "snapshot"
+        response = client.post(
+            "/mcp/proxy",
+            headers=agent_headers(key),
+            json=message(
+                "tools/call",
+                {"name": "filesystem.read", "arguments": {"path": "/home/user/readme.txt"}},
+            ),
+        )
+        assert response.status_code == 200
+        live_message = json.loads(websocket.receive_text())
+
+    assert live_message["type"] == "mcp_event"
+    assert live_message["data"]["agent_id"] == agent_id
+    assert live_message["data"]["ml_anomaly"] is True
+    persisted = client.get("/mcp/events", headers=operator_headers(), params={"agent_id": agent_id})
+    assert persisted.status_code == 200
+    assert persisted.json()["events"][0]["ml_anomaly"] is True
+
+
+def test_cors_allows_mcp_session_header(gateway_client):
+    client, _ = gateway_client
+    response = client.options(
+        "/mcp/proxy",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type,mcp-session-id",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "mcp-session-id" in response.headers["access-control-allow-headers"].lower()
 
 
 def test_disallowed_tool_call_is_blocked_before_upstream(gateway_client, monkeypatch):

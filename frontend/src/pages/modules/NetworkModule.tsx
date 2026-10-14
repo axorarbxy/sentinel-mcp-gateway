@@ -100,7 +100,7 @@ const NetworkModule: React.FC = () => {
 
   return (
     <Box sx={{ p: 3, maxWidth: 1200, mx: 'auto' }}>
-      <Paper sx={{ p: 3, mb: 2, bgcolor: 'rgba(26,35,50,0.8)' }}>
+      <Paper sx={{ p: 3, mb: 2, bgcolor: 'rgba(23, 18, 20,0.8)' }}>
         <Typography variant="h4" sx={{ fontWeight: 600 }}>Network Security</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
           Analyze flow records with the UNSW-NB15 classifier or run a quick heuristic check.

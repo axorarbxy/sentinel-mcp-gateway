@@ -8,12 +8,15 @@ from datetime import datetime
 import hashlib
 import os
 import sys
+from pathlib import Path
 
 from monitoring.time_utils import utcnow
 import re
 
-# Database setup - Using SQLite for development
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./database/sentinel_mcp.db")
+# Keep the default SQLite database beside this module so restarting the app
+# from a different working directory cannot silently create a new empty DB.
+DEFAULT_DATABASE_PATH = Path(__file__).resolve().with_name("sentinel_mcp.db")
+DATABASE_URL = os.getenv("DATABASE_URL") or f"sqlite:///{DEFAULT_DATABASE_PATH.as_posix()}"
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -310,6 +313,8 @@ class MCPAgent(Base):
     name = Column(String(100), nullable=False)
     name_normalized = Column(String(100), nullable=False, unique=True, index=True)
     description = Column(String(500), nullable=True)
+    # Older SQLite databases still require this retired plaintext-key column.
+    legacy_api_key = Column("api_key", String(255), nullable=False, default="retired:legacy")
     credential_hash = Column(String(255), nullable=False, unique=True, index=True)
     credential_prefix = Column(String(64), nullable=False)
     credential_id = Column(String(16), nullable=True, unique=True, index=True)

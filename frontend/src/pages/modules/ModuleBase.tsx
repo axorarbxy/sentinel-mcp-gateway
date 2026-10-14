@@ -95,11 +95,19 @@ const ModuleBase: React.FC<ModuleBaseProps> = ({
         return <InfoIcon />;
     }
   };
+  const passwordAnalysis = inputType === 'password' ? results?.analysis : null;
+  const issueCount = passwordAnalysis?.issues?.length ?? results?.results?.length ?? 0;
+  const highestSeverity = passwordAnalysis?.severity || results?.results?.reduce((max: any, r: any) => {
+    const severities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+    const current = severities.indexOf(r.severity);
+    const maxSev = severities.indexOf(max?.severity || 'LOW');
+    return current > maxSev ? r : max;
+  }, { severity: 'LOW' })?.severity || 'N/A';
 
   return (
     <Box sx={{ p: 3, maxWidth: 1200, mx: 'auto' }}>
       {/* Header */}
-      <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(26,35,50,0.8)' }}>
+      <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(23, 18, 20,0.8)' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <Box sx={{ fontSize: 40 }}>{icon}</Box>
           <Box>
@@ -138,9 +146,9 @@ const ModuleBase: React.FC<ModuleBaseProps> = ({
               minWidth: 120,
               py: 1.5,
               borderRadius: 2,
-              background: 'linear-gradient(135deg, #90caf9, #42a5f5)',
+              background: 'linear-gradient(135deg, #6D001A, #8A1733)',
               '&:hover': {
-                background: 'linear-gradient(135deg, #42a5f5, #1e88e5)',
+                background: 'linear-gradient(135deg, #8A1733, #4A0012)',
               },
             }}
           >
@@ -167,7 +175,7 @@ const ModuleBase: React.FC<ModuleBaseProps> = ({
                       Risk Score
                     </Typography>
                     <Typography variant="h2" sx={{ fontWeight: 700 }}>
-                      {(results.risk_score * 100).toFixed(0)}%
+                      {((results.risk_score ?? 0) * 100).toFixed(0)}%
                     </Typography>
                     <Chip
                       label={results.risk_score > 0.7 ? 'HIGH' : results.risk_score > 0.4 ? 'MEDIUM' : 'LOW'}
@@ -181,14 +189,16 @@ const ModuleBase: React.FC<ModuleBaseProps> = ({
                 <Card sx={{ textAlign: 'center', bgcolor: 'rgba(0,0,0,0.2)' }}>
                   <CardContent>
                     <Typography color="textSecondary" gutterBottom>
-                      Total Events
+                      {passwordAnalysis ? 'Password findings' : 'Total Events'}
                     </Typography>
                     <Typography variant="h2" sx={{ fontWeight: 700 }}>
-                      {results.results?.length || 0}
+                      {issueCount}
                     </Typography>
                     <Chip
-                      label={results.results?.length > 0 ? 'Alerts Found' : 'No Issues'}
-                      color={results.results?.length > 0 ? 'warning' : 'success'}
+                      label={passwordAnalysis
+                        ? issueCount > 0 ? 'Recommendations' : 'No Issues'
+                        : results.results?.length > 0 ? 'Alerts Found' : 'No Issues'}
+                      color={issueCount > 0 ? 'warning' : 'success'}
                       sx={{ mt: 1 }}
                     />
                   </CardContent>
@@ -201,16 +211,13 @@ const ModuleBase: React.FC<ModuleBaseProps> = ({
                       Highest Severity
                     </Typography>
                     <Typography variant="h2" sx={{ fontWeight: 700 }}>
-                      {results.results?.reduce((max: any, r: any) => {
-                        const severities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
-                        const current = severities.indexOf(r.severity);
-                        const maxSev = severities.indexOf(max?.severity || 'LOW');
-                        return current > maxSev ? r : max;
-                      }, { severity: 'LOW' })?.severity || 'N/A'}
+                      {highestSeverity}
                     </Typography>
                     <Chip
-                      label="Highest Alert"
-                      color="warning"
+                      label={passwordAnalysis ? `${passwordAnalysis.strength} password` : 'Highest Alert'}
+                      color={passwordAnalysis
+                        ? passwordAnalysis.severity === 'HIGH' ? 'error' : passwordAnalysis.severity === 'MEDIUM' ? 'warning' : 'success'
+                        : 'warning'}
                       sx={{ mt: 1 }}
                     />
                   </CardContent>
@@ -226,7 +233,26 @@ const ModuleBase: React.FC<ModuleBaseProps> = ({
             </Typography>
             <Divider sx={{ mb: 2 }} />
 
-            {results.results && results.results.length === 0 ? (
+            {passwordAnalysis && (
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="body1">
+                  Strength: <strong>{passwordAnalysis.strength}</strong>
+                  {' · '}
+                  Strength score: <strong>{(passwordAnalysis.strength_score * 100).toFixed(0)}%</strong>
+                  {' · '}
+                  Estimated entropy: <strong>{passwordAnalysis.entropy.toFixed(1)} bits</strong>
+                </Typography>
+                {passwordAnalysis.issues.length > 0 && (
+                  <Box component="ul" sx={{ mt: 1 }}>
+                    {passwordAnalysis.issues.map((issue: string) => (
+                      <li key={issue}><Typography variant="body2">{issue}</Typography></li>
+                    ))}
+                  </Box>
+                )}
+              </Box>
+            )}
+
+            {results.results && results.results.length === 0 && issueCount === 0 ? (
               <Box sx={{ textAlign: 'center', py: 4 }}>
                 <CheckCircleIcon sx={{ fontSize: 48, color: 'success.main' }} />
                 <Typography variant="h6" color="success.main" sx={{ mt: 2 }}>

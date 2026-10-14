@@ -208,14 +208,15 @@ const MCPDashboard: React.FC = () => {
   }, [fetchAll]);
 
   // Auto-refresh agents table when live events arrive
+  const latestLiveEventId = liveEvents[0]?.event_id;
   useEffect(() => {
-    if (liveEvents.length > 0) {
+    if (latestLiveEventId) {
       fetchWithAuth(`${API_URL}/mcp/agents`)
         .then((res) => res.ok && res.json())
         .then((data) => data && setAgents(data))
-        .catch(() => {});
+        .catch((error) => console.error('Failed to refresh agents after live traffic:', error));
     }
-  }, [liveEvents.length]);
+  }, [latestLiveEventId]);
 
   // ============ CREATE AGENT ============
   const handleCreateAgent = async () => {
@@ -406,7 +407,7 @@ const MCPDashboard: React.FC = () => {
         </Alert>
       )}
 
-      <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(26,35,50,0.8)' }}>
+      <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(23, 18, 20,0.8)' }}>
         <Box
           sx={{
             display: 'flex',
@@ -457,7 +458,7 @@ const MCPDashboard: React.FC = () => {
       {/* Overview Stats */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid size={{ xs: 6, sm: 3 }}>
-          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(144,202,249,0.15)' }}>
+          <Card sx={{ bgcolor: 'rgba(23,18,20,0.8)', border: '1px solid rgba(213,107,130,0.18)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                 <PersonIcon color="primary" />
@@ -475,7 +476,7 @@ const MCPDashboard: React.FC = () => {
           </Card>
         </Grid>
         <Grid size={{ xs: 6, sm: 3 }}>
-          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(76,175,80,0.15)' }}>
+          <Card sx={{ bgcolor: 'rgba(23, 18, 20,0.8)', border: '1px solid rgba(76,175,80,0.15)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                 <CloudIcon color="success" />
@@ -493,7 +494,7 @@ const MCPDashboard: React.FC = () => {
           </Card>
         </Grid>
         <Grid size={{ xs: 6, sm: 3 }}>
-          <Card sx={{ bgcolor: 'rgba(26,35,50,0.8)', border: '1px solid rgba(255,152,0,0.15)' }}>
+          <Card sx={{ bgcolor: 'rgba(23, 18, 20,0.8)', border: '1px solid rgba(255,152,0,0.15)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                 <SecurityIcon color="warning" />
@@ -513,7 +514,7 @@ const MCPDashboard: React.FC = () => {
         <Grid size={{ xs: 6, sm: 3 }}>
           <Card
             sx={{
-              bgcolor: 'rgba(26,35,50,0.8)',
+              bgcolor: 'rgba(23, 18, 20,0.8)',
               border: wsConnected ? '2px solid rgba(76,175,80,0.5)' : '1px solid rgba(244,67,54,0.15)',
               transition: 'all 0.3s',
             }}
@@ -537,61 +538,84 @@ const MCPDashboard: React.FC = () => {
       </Grid>
 
       {/* Live Traffic Feed */}
-      {wsConnected && liveEvents.length > 0 && (
-        <Paper
-          sx={{
-            p: 2,
-            mb: 3,
-            bgcolor: 'rgba(26,35,50,0.8)',
-            border: '1px solid rgba(76,175,80,0.3)',
-          }}
-        >
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <LiveIcon sx={{ color: '#f44336', animation: 'pulse 1.5s infinite' }} />
-              <Typography variant="h6">Live Traffic Feed</Typography>
-              <Chip size="small" label={`${liveEvents.length} events`} />
-            </Box>
-            <Button size="small" onClick={clearEvents}>
-              Clear
-            </Button>
+      <Paper
+        sx={{
+          p: 2,
+          mb: 3,
+          bgcolor: 'rgba(23, 18, 20,0.8)',
+          border: `1px solid ${wsConnected ? 'rgba(76,175,80,0.3)' : 'rgba(213,107,130,0.25)'}`,
+        }}
+      >
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <LiveIcon sx={{ color: wsConnected ? '#4caf50' : '#D56B82', animation: wsConnected ? 'pulse 1.5s infinite' : 'none' }} />
+            <Typography variant="h6">Agent Events</Typography>
+            <Chip size="small" label={wsConnected ? 'LIVE' : 'RECONNECTING'} color={wsConnected ? 'success' : 'warning'} />
+            <Chip size="small" label={`${liveEvents.length} events`} />
           </Box>
-          <Divider sx={{ mb: 2 }} />
-          <Box sx={{ maxHeight: 300, overflowY: 'auto' }}>
-            {liveEvents.slice(0, 10).map((event, idx) => (
+          <Button size="small" onClick={clearEvents} disabled={liveEvents.length === 0}>
+            Clear
+          </Button>
+        </Box>
+        <Divider sx={{ mb: 2 }} />
+        {liveEvents.length === 0 ? (
+          <Box sx={{ py: 3, textAlign: 'center' }}>
+            <Typography variant="body2" color="textSecondary">
+              No agent events yet. Send MCP requests through an agent’s API key to see activity here.
+            </Typography>
+          </Box>
+        ) : (
+          <Box sx={{ maxHeight: 360, overflowY: 'auto' }}>
+            {liveEvents.slice(0, 25).map((event) => (
               <Box
-                key={idx}
+                key={event.event_id}
                 sx={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 2,
+                  gap: 1.5,
                   p: 1,
                   mb: 0.5,
                   borderRadius: 1,
-                  bgcolor: event.allowed ? 'rgba(76,175,80,0.05)' : 'rgba(244,67,54,0.05)',
-                  borderLeft: `3px solid ${event.allowed ? '#4caf50' : '#f44336'}`,
+                  flexWrap: 'wrap',
+                  bgcolor: event.decision === 'block' ? 'rgba(244,67,54,0.05)' : 'rgba(76,175,80,0.05)',
+                  borderLeft: `3px solid ${event.decision === 'block' ? '#f44336' : event.decision === 'flag' ? '#ff9800' : '#4caf50'}`,
                 }}
               >
-                <Typography variant="caption" sx={{ fontFamily: 'monospace', minWidth: 80 }}>
+                <Typography variant="caption" sx={{ fontFamily: 'monospace', minWidth: 90 }}>
                   {new Date(event.timestamp).toLocaleTimeString()}
                 </Typography>
                 <Chip
                   size="small"
-                  label={event.allowed ? 'ALLOW' : 'BLOCK'}
-                  color={event.allowed ? 'success' : 'error'}
+                  label={event.decision.toUpperCase()}
+                  color={event.decision === 'block' ? 'error' : event.decision === 'flag' ? 'warning' : 'success'}
                   sx={{ minWidth: 70 }}
                 />
-                <Typography variant="caption" sx={{ fontFamily: 'monospace', minWidth: 180 }}>
-                  {event.method}
+                <Button
+                  size="small"
+                  color="primary"
+                  onClick={() => typeof event.agent_id === 'number' && navigate(`/mcp/agents/${event.agent_id}`)}
+                  disabled={typeof event.agent_id !== 'number'}
+                  sx={{ textTransform: 'none', minWidth: 120 }}
+                >
+                  {event.agent_name}
+                </Button>
+                <Typography variant="caption" sx={{ fontFamily: 'monospace', minWidth: 150 }}>
+                  {event.tool_name || event.method}
                 </Typography>
-                <Typography variant="caption" color="textSecondary" noWrap sx={{ flex: 1 }}>
-                  {event.agent_id}
+                <Typography variant="caption" color="textSecondary" noWrap sx={{ flex: 1, minWidth: 120 }}>
+                  {event.decision_reason || 'No policy reason reported'}
+                </Typography>
+                <Typography variant="caption" color="textSecondary" sx={{ minWidth: 145 }}>
+                  ML {event.ml_score === null ? 'n/a' : `${(event.ml_score * 100).toFixed(1)}%`} · Rule {event.rule_risk_score === null ? 'n/a' : `${(event.rule_risk_score * 100).toFixed(1)}%`}
+                </Typography>
+                <Typography variant="caption" color="textSecondary" sx={{ minWidth: 65, textAlign: 'right' }}>
+                  {event.latency_ms === null ? '—' : `${event.latency_ms.toFixed(1)} ms`}
                 </Typography>
               </Box>
             ))}
           </Box>
-        </Paper>
-      )}
+        )}
+      </Paper>
 
       {/* Tabs */}
       <Paper sx={{ mb: 3 }}>
@@ -926,6 +950,14 @@ const MCPDashboard: React.FC = () => {
             margin="normal"
             multiline
             rows={2}
+          />
+          <TextField
+            fullWidth
+            label="Allowed tools"
+            value={newAgent.allowed_tools}
+            onChange={(e) => setNewAgent({ ...newAgent, allowed_tools: e.target.value })}
+            margin="normal"
+            helperText="Optional, comma-separated tool names. Set this to create a restricted agent for policy demos."
           />
           <Alert severity="info" sx={{ mt: 2 }}>
             An API key will be generated automatically. Save it securely.

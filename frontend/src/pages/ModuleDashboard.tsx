@@ -11,6 +11,7 @@ import {
   LinearProgress,
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
+import { gatewayFetch } from '../services/api';
 
 interface ModuleStats {
   name: string;
@@ -40,7 +41,7 @@ const ModuleDashboard: React.FC = () => {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const response = await fetch('http://localhost:8001/cybereye/stats');
+        const response = await gatewayFetch('/cybereye/stats');
         if (response.ok) {
           const data = await response.json();
           setModuleStats(prev => prev.map(module => ({
@@ -75,7 +76,7 @@ const ModuleDashboard: React.FC = () => {
 
   return (
     <Box sx={{ p: 3, maxWidth: 1200, mx: 'auto' }}>
-      <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(26,35,50,0.8)' }}>
+      <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(23, 18, 20,0.8)' }}>
         <Typography variant="h4" sx={{ fontWeight: 600 }}>
           🛡️ CyberEye Module Dashboard
         </Typography>
@@ -90,7 +91,7 @@ const ModuleDashboard: React.FC = () => {
             <Card
               sx={{
                 height: '100%',
-                bgcolor: 'rgba(26,35,50,0.8)',
+                bgcolor: 'rgba(23, 18, 20,0.8)',
                 border: '1px solid rgba(255,255,255,0.05)',
                 transition: 'transform 0.2s, box-shadow 0.2s',
                 cursor: 'pointer',

@@ -18,6 +18,12 @@ AGENT_KEY_PATTERN = re.compile(
 )
 
 
+def is_demo_environment() -> bool:
+    """Enable demo-only operator privileges outside production deployments."""
+    environment = os.getenv("SENTINEL_ENVIRONMENT", "dev").strip().lower()
+    return environment in {"dev", "development", "local"}
+
+
 def create_agent_api_key() -> tuple[str, str, str]:
     """Return a prefixed high-entropy key, its indexed lookup ID, and display prefix."""
     environment = os.getenv("SENTINEL_ENVIRONMENT", "dev").lower()

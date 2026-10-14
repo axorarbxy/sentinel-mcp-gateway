@@ -1,6 +1,7 @@
 // pages/modules/AndroidModule.tsx
 import React from 'react';
 import ModuleBase from './ModuleBase';
+import { gatewayFetch } from '../../services/api';
 
 const AndroidModule: React.FC = () => {
   const handleAnalyze = async (input: string) => {
@@ -14,7 +15,7 @@ const AndroidModule: React.FC = () => {
       };
     }
 
-    const response = await fetch('http://localhost:8001/cybereye/analyze', {
+    const response = await gatewayFetch('/cybereye/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

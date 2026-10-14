@@ -35,17 +35,17 @@ phishing_model_dir = os.path.join(project_root, 'ml_models', 'phishing_detector'
 qr_image_model_dir = os.path.join(project_root, 'models')
 qr_legacy_package_dir = os.path.join(project_root, 'ml_models', 'qr_scanner')
 
-print(f"📁 QR models: {model_dir}")
-print(f"📁 Phishing models: {phishing_model_dir}")
+print(f"QR models: {model_dir}")
+print(f"Phishing models: {phishing_model_dir}")
 
 try:
     xgb_model = joblib.load(os.path.join(model_dir, 'url_xgb_model.pkl'))
     rf_model = joblib.load(os.path.join(model_dir, 'url_rf_model.pkl'))
     scaler = joblib.load(os.path.join(model_dir, 'url_scaler.pkl'))
-    print("✅ QR URL-based ML models loaded")
+    print("QR URL-based ML models loaded")
     MODELS_LOADED = True
 except Exception as e:
-    print(f"⚠️ Failed to load QR models: {e}")
+    print(f"Failed to load QR models: {e}")
     MODELS_LOADED = False
     xgb_model = rf_model = scaler = None
 
@@ -53,10 +53,10 @@ try:
     phishing_xgb = joblib.load(os.path.join(phishing_model_dir, 'phishing_xgb.pkl'))
     phishing_rf = joblib.load(os.path.join(phishing_model_dir, 'phishing_rf.pkl'))
     phishing_scaler = joblib.load(os.path.join(phishing_model_dir, 'phishing_scaler.pkl'))
-    print("✅ Phishing detection models loaded")
+    print("Phishing detection models loaded")
     PHISHING_MODELS_LOADED = True
 except Exception as e:
-    print(f"⚠️ Failed to load phishing models: {e}")
+    print(f"Failed to load phishing models: {e}")
     PHISHING_MODELS_LOADED = False
     phishing_xgb = phishing_rf = phishing_scaler = None
 
@@ -74,10 +74,10 @@ try:
     qr_image_scaler = joblib.load(os.path.join(qr_image_model_dir, 'scaler.pkl'))
     if getattr(qr_image_xgb, 'n_features_in_', None) != 5 or getattr(qr_image_scaler, 'n_features_in_', None) != 5:
         raise ValueError("QR image XGBoost and scaler must use the trained 5-feature schema")
-    print("✅ QR image CNN + XGBoost models loaded")
+    print("QR image CNN + XGBoost models loaded")
     QR_IMAGE_MODELS_LOADED = True
 except Exception as e:
-    print(f"⚠️ Failed to load QR image models: {e}")
+    print(f"Failed to load QR image models: {e}")
     QR_IMAGE_MODELS_LOADED = False
     qr_cnn = qr_image_xgb = qr_image_scaler = None
 
@@ -94,9 +94,9 @@ try:
         if inserted_package_path:
             sys.path.remove(package_path)
     QR_SERIALIZED_ENSEMBLE_LOADED = True
-    print("✅ Serialized QR ensemble loaded (experimental)")
+    print("Serialized QR ensemble loaded (experimental)")
 except Exception as e:
-    print(f"⚠️ Failed to load serialized QR ensemble: {e}")
+    print(f"Failed to load serialized QR ensemble: {e}")
     QR_SERIALIZED_ENSEMBLE_LOADED = False
     legacy_ensemble = qr_legacy_preprocessor = None
 
@@ -349,11 +349,11 @@ def analyze_url(url: str, model_type: str = 'qr') -> dict:
         parsed = urlparse(url.lower())
         domain = parsed.netloc.lower()
         if is_known_benign(domain):
-            print(f"✅ Known benign domain: {domain}")
+            print(f"Known benign domain: {domain}")
             return {
                 'is_malicious': False, 'confidence': 0.02,
                 'xgb_score': 0.02, 'rf_score': 0.02,
-                'risk_factors': ['✅ Verified official service'], 'url': url
+                'risk_factors': ['Verified official service'], 'url': url
             }
     except Exception as e:
         print(f"Known benign check error: {e}")
@@ -371,11 +371,11 @@ def analyze_url(url: str, model_type: str = 'qr') -> dict:
                        '.tk', '.ml', '.ga', '.cf', '.top', '.xyz']
         has_hard_signal = any(sig in domain for sig in hard_signals)
         if is_trusted_tld and has_trusted_path and not has_hard_signal:
-            print(f"✅ Trusted TLD + content path: {domain}")
+            print(f"Trusted TLD + content path: {domain}")
             return {
                 'is_malicious': False, 'confidence': 0.15,
                 'xgb_score': 0.15, 'rf_score': 0.15,
-                'risk_factors': ['✅ Trusted domain with content path'], 'url': url
+                'risk_factors': ['Trusted domain with content path'], 'url': url
             }
     except Exception as e:
         print(f"Trusted path check error: {e}")
@@ -410,7 +410,7 @@ def analyze_url(url: str, model_type: str = 'qr') -> dict:
         
         # CRITICAL: Don't block if no specific risk factors
         if not risk_factors:
-            print(f"⚠️ Model flagged {url} ({avg_prob*100:.1f}%) but no threats — allowing")
+            print(f"Model flagged {url} ({avg_prob*100:.1f}%) but no threats — allowing")
             return {
                 'is_malicious': False,
                 'confidence': 0.3,

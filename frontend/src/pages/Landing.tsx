@@ -33,37 +33,37 @@ const features = [
     icon: <SecurityIcon sx={{ fontSize: 40 }} />,
     title: 'AI Security Monitoring',
     description: 'Real-time monitoring of AI agent behavior with ML-based anomaly detection',
-    color: '#90caf9',
+    color: '#D56B82',
   },
   {
     icon: <ShieldIcon sx={{ fontSize: 40 }} />,
     title: 'MCP Security Gateway',
     description: 'Protect AI agents at the Model Context Protocol layer with policy enforcement',
-    color: '#4caf50',
+    color: '#D56B82',
   },
   {
     icon: <AnalyticsIcon sx={{ fontSize: 40 }} />,
     title: 'Threat Intelligence',
     description: '11 specialized detection modules for phishing, malware, IDS, and more',
-    color: '#ff9800',
+    color: '#D56B82',
   },
   {
     icon: <SpeedIcon sx={{ fontSize: 40 }} />,
     title: 'Real-time Dashboard',
     description: 'Beautiful dark-themed dashboard with live statistics and alerts',
-    color: '#f48fb1',
+    color: '#D56B82',
   },
   {
     icon: <WarningIcon sx={{ fontSize: 40 }} />,
     title: 'Anomaly Detection',
     description: 'Isolation Forest ML models detect behavioral deviations in real-time',
-    color: '#f44336',
+    color: '#D56B82',
   },
   {
     icon: <TimelineIcon sx={{ fontSize: 40 }} />,
     title: 'Agent Profiling',
     description: 'Per-agent behavioral models with detailed activity tracking',
-    color: '#ab47bc',
+    color: '#D56B82',
   },
 ];
 
@@ -82,20 +82,24 @@ const Landing: React.FC = () => {
   const isAuthenticated = !!localStorage.getItem('access_token');
 
   return (
-    <Box sx={{ bgcolor: '#0a1929', minHeight: '100vh' }}>
+    <Box sx={{ bgcolor: 'background.default', minHeight: '100vh' }}>
       {/* Navigation */}
       <AppBar
         position="sticky"
         elevation={0}
         sx={{
-          bgcolor: 'rgba(10, 25, 41, 0.95)',
+          bgcolor: 'rgba(8, 8, 8, 0.95)',
           backdropFilter: 'blur(10px)',
           borderBottom: '1px solid rgba(255,255,255,0.05)',
         }}
       >
         <Toolbar>
-          <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 600 }}>
-            🛡️ Sentinel-MCP
+          <Typography
+            variant="h6"
+            sx={{ flexGrow: 1, fontWeight: 600, color: 'primary.light', display: 'flex', alignItems: 'center', gap: 1 }}
+          >
+            <ShieldIcon />
+            Sentinel-MCP
           </Typography>
           
           {isMobile ? (
@@ -114,7 +118,7 @@ const Landing: React.FC = () => {
                 variant="outlined"
                 color="primary"
                 onClick={() => navigate('/login')}
-                sx={{ borderRadius: 2 }}
+                sx={{ borderRadius: 2, color: 'primary.light', borderColor: 'rgba(213,107,130,0.55)' }}
               >
                 Sign In
               </Button>
@@ -124,9 +128,9 @@ const Landing: React.FC = () => {
                 onClick={() => navigate('/register')}
                 sx={{
                   borderRadius: 2,
-                  background: 'linear-gradient(135deg, #90caf9, #42a5f5)',
+                  background: 'linear-gradient(135deg, #6D001A, #8A1733)',
                   '&:hover': {
-                    background: 'linear-gradient(135deg, #42a5f5, #1e88e5)',
+                    background: 'linear-gradient(135deg, #8A1733, #4A0012)',
                   },
                 }}
               >
@@ -160,7 +164,7 @@ const Landing: React.FC = () => {
               sx={{
                 fontWeight: 800,
                 mb: 2,
-                background: 'linear-gradient(135deg, #90caf9 0%, #42a5f5 50%, #f48fb1 100%)',
+                background: 'linear-gradient(135deg, #FFFFFF 0%, #FFFFFF 100%)',
                 backgroundClip: 'text',
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
@@ -187,9 +191,9 @@ const Landing: React.FC = () => {
                   py: 1.5,
                   borderRadius: 3,
                   fontSize: '1.1rem',
-                  background: 'linear-gradient(135deg, #90caf9, #42a5f5)',
+                  background: 'linear-gradient(135deg, #6D001A, #8A1733)',
                   '&:hover': {
-                    background: 'linear-gradient(135deg, #42a5f5, #1e88e5)',
+                    background: 'linear-gradient(135deg, #8A1733, #4A0012)',
                   },
                 }}
               >
@@ -206,6 +210,8 @@ const Landing: React.FC = () => {
                   py: 1.5,
                   borderRadius: 3,
                   fontSize: '1.1rem',
+                  color: 'primary.light',
+                  borderColor: 'rgba(213,107,130,0.55)',
                 }}
               >
                 View on GitHub
@@ -223,9 +229,9 @@ const Landing: React.FC = () => {
               <Card
                 sx={{
                   textAlign: 'center',
-                  bgcolor: 'rgba(26, 35, 50, 0.8)',
+                  bgcolor: 'rgba(23, 18, 20, 0.8)',
                   backdropFilter: 'blur(10px)',
-                  border: '1px solid rgba(255,255,255,0.05)',
+                  border: '1px solid rgba(255,255,255,0.08)',
                   py: 2,
                 }}
               >
@@ -233,8 +239,8 @@ const Landing: React.FC = () => {
                   sx={{
                     mx: 'auto',
                     mb: 1,
-                    bgcolor: 'rgba(144,202,249,0.15)',
-                    color: '#90caf9',
+                    bgcolor: 'rgba(109,0,26,0.45)',
+                    color: '#FFFFFF',
                   }}
                 >
                   {stat.icon}
@@ -278,7 +284,7 @@ const Landing: React.FC = () => {
               <Card
                 sx={{
                   height: '100%',
-                  bgcolor: 'rgba(26, 35, 50, 0.8)',
+                  bgcolor: 'rgba(23, 18, 20, 0.8)',
                   backdropFilter: 'blur(10px)',
                   border: '1px solid rgba(255,255,255,0.05)',
                   transition: 'transform 0.2s, box-shadow 0.2s',
@@ -304,7 +310,7 @@ const Landing: React.FC = () => {
       </Container>
 
       {/* Modules Section - Using Box with flex instead of Grid */}
-      <Box sx={{ bgcolor: 'rgba(26, 35, 50, 0.5)', py: 8 }} id="modules">
+      <Box sx={{ bgcolor: 'rgba(23, 18, 20, 0.65)', py: 8 }} id="modules">
         <Container maxWidth="lg">
           <Typography
             variant="h3"
@@ -341,7 +347,7 @@ const Landing: React.FC = () => {
                 <Card
                   sx={{
                     textAlign: 'center',
-                    bgcolor: 'rgba(26, 35, 50, 0.6)',
+                    bgcolor: 'rgba(23, 18, 20, 0.75)',
                     border: '1px solid rgba(255,255,255,0.05)',
                     py: 2,
                     transition: 'transform 0.2s',
@@ -373,8 +379,8 @@ const Landing: React.FC = () => {
           sx={{
             p: { xs: 4, md: 6 },
             textAlign: 'center',
-            background: 'linear-gradient(135deg, rgba(144,202,249,0.1), rgba(244,143,177,0.05))',
-            border: '1px solid rgba(255,255,255,0.05)',
+            background: 'linear-gradient(135deg, rgba(109,0,26,0.32), rgba(255,255,255,0.04))',
+            border: '1px solid rgba(255,255,255,0.12)',
             borderRadius: 4,
           }}
         >
@@ -395,9 +401,9 @@ const Landing: React.FC = () => {
                 py: 1.5,
                 borderRadius: 3,
                 fontSize: '1.1rem',
-                background: 'linear-gradient(135deg, #90caf9, #42a5f5)',
+                background: 'linear-gradient(135deg, #6D001A, #8A1733)',
                 '&:hover': {
-                  background: 'linear-gradient(135deg, #42a5f5, #1e88e5)',
+                  background: 'linear-gradient(135deg, #8A1733, #4A0012)',
                 },
               }}
             >
@@ -409,7 +415,14 @@ const Landing: React.FC = () => {
               href="https://github.com/axorarbxy/sentinel-mcp-gateway"
               target="_blank"
               startIcon={<GitHubIcon />}
-              sx={{ px: 5, py: 1.5, borderRadius: 3, fontSize: '1.1rem' }}
+              sx={{
+                px: 5,
+                py: 1.5,
+                borderRadius: 3,
+                fontSize: '1.1rem',
+                color: 'primary.light',
+                borderColor: 'rgba(213,107,130,0.55)',
+              }}
             >
               GitHub
             </Button>

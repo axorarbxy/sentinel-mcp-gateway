@@ -18,7 +18,7 @@ import gateway
 import httpx
 import mcp_interception
 from auth import create_access_token, create_agent_api_key, hash_api_key
-from database import AuditLog, Base, MCPAgent
+from database import AuditLog, Base, MCPAgent, User
 
 REAL_ASYNC_CLIENT = httpx.AsyncClient
 
@@ -441,3 +441,93 @@ def test_legacy_plaintext_agent_key_is_hashed_and_scrubbed(monkeypatch):
     assert stored_id == lookup_id
     assert stored_prefix == prefix
     engine.dispose()
+
+
+def test_demo_registration_and_legacy_login_receive_admin_scope(gateway_client, monkeypatch):
+    client, session_factory = gateway_client
+    monkeypatch.setenv("SENTINEL_ENVIRONMENT", "dev")
+
+    registered = client.post(
+        "/auth/register",
+        json={
+            "username": "demo_new_user",
+            "email": "demo-new-user@example.com",
+            "password": "StrongPass123",
+            "full_name": "Demo User",
+        },
+    )
+    assert registered.status_code == 200, registered.text
+    assert registered.json()["is_admin"] is True
+
+    login = client.post(
+        "/auth/login",
+        json={"username_or_email": "demo_new_user", "password": "StrongPass123"},
+    )
+    assert login.status_code == 200
+    assert set(auth.decode_token(login.json()["access_token"])["scopes"]) == {
+        "gateway:read",
+        "gateway:write",
+        "gateway:admin",
+    }
+    agent_management = client.get(
+        "/mcp/agents",
+        headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+    )
+    assert agent_management.status_code == 200
+
+    db = session_factory()
+    try:
+        legacy_user = User(
+            username="demo_legacy_user",
+            email="demo-legacy-user@example.com",
+            hashed_password=auth.get_password_hash("StrongPass123"),
+            is_admin=False,
+        )
+        db.add(legacy_user)
+        db.commit()
+    finally:
+        db.close()
+
+    legacy_login = client.post(
+        "/auth/login",
+        json={"username_or_email": "demo_legacy_user", "password": "StrongPass123"},
+    )
+    assert legacy_login.status_code == 200
+    assert set(auth.decode_token(legacy_login.json()["access_token"])["scopes"]) == {
+        "gateway:read",
+        "gateway:write",
+        "gateway:admin",
+    }
+
+    db = session_factory()
+    try:
+        legacy_user = db.query(User).filter_by(username="demo_legacy_user").one()
+        assert legacy_user.is_admin is True
+    finally:
+        db.close()
+
+
+def test_production_login_does_not_promote_legacy_user(gateway_client, monkeypatch):
+    client, session_factory = gateway_client
+    monkeypatch.setenv("SENTINEL_ENVIRONMENT", "production")
+
+    db = session_factory()
+    try:
+        user = User(
+            username="production_user",
+            email="production-user@example.com",
+            hashed_password=auth.get_password_hash("StrongPass123"),
+            is_admin=False,
+        )
+        db.add(user)
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post(
+        "/auth/login",
+        json={"username_or_email": "production_user", "password": "StrongPass123"},
+    )
+
+    assert response.status_code == 200
+    assert auth.decode_token(response.json()["access_token"])["scopes"] == ["gateway:read"]

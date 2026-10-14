@@ -63,7 +63,7 @@ const PayloadModule: React.FC = () => {
 
   return (
     <Box sx={{ p: 3, maxWidth: 1000, mx: 'auto' }}>
-      <Paper sx={{ p: 3, mb: 2, bgcolor: 'rgba(26,35,50,0.8)' }}>
+      <Paper sx={{ p: 3, mb: 2, bgcolor: 'rgba(23, 18, 20,0.8)' }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
           <Box>
             <Typography variant="h4" sx={{ fontWeight: 600 }}>Payload Analyzer</Typography>
