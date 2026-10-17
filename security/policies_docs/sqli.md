@@ -32,6 +32,8 @@ The editable catalog is `security/sqli_indicators.json`; IDs and default severit
 | SQLI-014 | Read-only mode violation | High |
 | SQLI-015 | Oversized input | Low |
 
+The catalog also contains 100 vendor-specific indicators, `SQLI-016` through `SQLI-115`, for PostgreSQL, Microsoft SQL Server, Oracle, SQLite, Snowflake, Amazon Redshift, and Google BigQuery capabilities and metadata. These additional indicators are disabled by default to avoid changing existing traffic decisions. Enable only the policies that match the configured database and tool behavior. They can be enabled and assigned a severity through the same admin UI and API as the built-in indicators.
+
 Each catalog entry has an ID, description, category, recommendation, severity and either bounded precompiled patterns or a named matcher. To add an indicator, add a catalog entry, implement a bounded matcher if required, add positive/evasion/negative fixtures to `tests/fixtures/sqli_cases.json`, and cover behavior in `tests/policy/test_sqli.py`.
 
 ## Decisions And Event Data

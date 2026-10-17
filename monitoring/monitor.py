@@ -39,10 +39,15 @@ class BehavioralMonitor:
         
         # Feature vectors for ML
         self.feature_history = defaultdict(lambda: deque(maxlen=window_size))
+        # Only successful requests teach the baseline; rejected traffic cannot
+        # make malicious behavior look normal.
+        self.allowed_tool_counts = defaultdict(lambda: defaultdict(int))
         
         # ML models per agent
         self.models = {}
         self.scalers = {}
+        self.model_sample_counts = {}
+        self.total_allowed_samples = defaultdict(int)
         
         # Anomaly alerts
         self.alerts = []
@@ -72,9 +77,17 @@ class BehavioralMonitor:
         timestamp = datetime.fromisoformat(request.get("timestamp", datetime.now().isoformat()))
         features.append(timestamp.hour / 24.0)  # Hour of day (normalized)
         features.append(timestamp.weekday() / 7.0)  # Day of week (normalized)
-        
-        # 2. Method type encoding
         method = request.get("method", "")
+
+        # 2. MCP method type encoding
+        mcp_methods = (
+            "tools/call", "tools/list", "resources/read", "resources/list",
+            "prompts/get", "prompts/list", "initialize", "notifications/initialized",
+        )
+        for mcp_method in mcp_methods:
+            features.append(1.0 if method == mcp_method else 0.0)
+
+        # 3. Method type encoding for non-MCP-specific integrations
         method_types = [
             "filesystem/read", "filesystem/write", "filesystem/delete",
             "shell/execute", "shell/command",
@@ -87,10 +100,15 @@ class BehavioralMonitor:
         # 3. Parameter features
         params = request.get("params", {})
         features.append(len(params))  # Number of parameters
+        # Aggregate shape only: do not put raw arguments into the model history.
+        features.append(min(float(request.get("argument_bytes", 0)) / 65536.0, 1.0))
+        features.append(min(float(request.get("argument_depth", 0)) / 32.0, 1.0))
+        features.append(min(float(request.get("argument_keys", 0)) / 128.0, 1.0))
+        features.append(min(float(request.get("argument_string_bytes", 0)) / 32768.0, 1.0))
         
         # 4. Path features
         if "path" in params:
-            path = params["path"]
+            path = str(params["path"])
             features.append(len(path.split("/")))  # Path depth
             features.append(1.0 if ".." in path else 0.0)  # Path traversal attempt
         else:
@@ -99,7 +117,7 @@ class BehavioralMonitor:
         
         # 5. Command features
         if "command" in params:
-            cmd = params["command"]
+            cmd = str(params["command"])
             features.append(len(cmd.split()))  # Command complexity
             features.append(len(cmd))  # Command length
         else:
@@ -108,7 +126,7 @@ class BehavioralMonitor:
         
         # 6. SQL features
         if "sql" in params:
-            sql = params["sql"]
+            sql = str(params["sql"])
             features.append(len(sql.split()))  # SQL complexity
             features.append(1.0 if any(word in sql.upper() for word in ["DROP", "DELETE", "INSERT"]) else 0.0)
         else:
@@ -141,8 +159,12 @@ class BehavioralMonitor:
         if "timestamp" not in request:
             request["timestamp"] = datetime.now().isoformat()
         
-        # Extract features
+        # Compare against the clean baseline before recording this observation.
+        tool_name = str(request.get("tool_name") or "")
+        prior_tool_uses = self.allowed_tool_counts[agent_id].get(tool_name, 0) if tool_name else 0
         features = self.extract_features(request)
+        features = np.append(features, 1.0 if tool_name and prior_tool_uses == 0 else 0.0)
+        features = np.append(features, min(np.log1p(prior_tool_uses) / 8.0, 1.0))
         
         # Add frequency feature
         freq_feature = self.get_frequency_feature(agent_id)
@@ -151,11 +173,12 @@ class BehavioralMonitor:
         # Store in history after computing the interval from the previous request.
         self.history[agent_id].append(request)
 
-        # Store features
-        self.feature_history[agent_id].append(features)
-        
-        # Detect anomalies if we have enough data
-        if len(self.feature_history[agent_id]) >= 20:
+        decision = str(request.get("decision", "allow")).lower()
+        anomaly_alert = None
+
+        # Score against the last trained baseline. Learning is performed below,
+        # after scoring, so a suspicious request cannot normalize itself.
+        if agent_id in self.models:
             is_anomaly = self.detect_anomaly(agent_id, features)
             if is_anomaly:
                 self.anomalies_detected += 1
@@ -168,13 +191,25 @@ class BehavioralMonitor:
                 }
                 self.alerts.append(alert)
                 logger.warning(f"🚨 ANOMALY DETECTED for agent {agent_id}: {request.get('method')}")
-                return True, alert
+                anomaly_alert = alert
         
-        # Train model periodically
-        if len(self.feature_history[agent_id]) >= 20 and agent_id not in self.models:
+        if decision == "allow":
+            self.feature_history[agent_id].append(features)
+            self.total_allowed_samples[agent_id] += 1
+            if tool_name:
+                self.allowed_tool_counts[agent_id][tool_name] += 1
+
+        # Refit from the bounded recent history to adapt to gradual workload
+        # changes. The cumulative count still advances when the deque is full.
+        refit_interval = max(5, min(20, self.window_size // 5))
+        last_fit_count = self.model_sample_counts.get(agent_id, 0)
+        if self.total_allowed_samples[agent_id] >= 20 and (
+            agent_id not in self.models
+            or self.total_allowed_samples[agent_id] - last_fit_count >= refit_interval
+        ):
             self.train_model(agent_id)
         
-        return False, None
+        return anomaly_alert is not None, anomaly_alert
     
     def train_model(self, agent_id: str):
         """
@@ -201,6 +236,7 @@ class BehavioralMonitor:
         )
         model.fit(X_scaled)
         self.models[agent_id] = model
+        self.model_sample_counts[agent_id] = self.total_allowed_samples[agent_id]
         
         logger.info(f"🧠 Trained model for agent {agent_id} on {len(X)} samples")
     

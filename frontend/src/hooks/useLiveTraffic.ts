@@ -137,9 +137,9 @@ export const useLiveTraffic = (
     seenEventIdsRef.current.add(event.event_id);
     setEvents((prev) => [event, ...prev].slice(0, maxEvents));
     setLiveStats((prev) => ({
-      total_requests: event.total_requests ?? prev.total_requests + 1,
+      total_requests: event.total_requests ?? prev.total_requests + (event.decision_source === 'cep' ? 0 : 1),
       total_blocked: event.total_blocked ?? prev.total_blocked + (event.decision === 'block' ? 1 : 0),
-      total_anomalies: event.total_anomalies ?? prev.total_anomalies + (event.ml_anomaly ? 1 : 0),
+      total_anomalies: event.total_anomalies ?? prev.total_anomalies + (event.ml_anomaly || event.decision_source === 'cep' ? 1 : 0),
     }));
     onEventRef.current?.(event);
   }, [maxEvents]);
@@ -180,6 +180,9 @@ export const useLiveTraffic = (
         // Send initial ping
         try {
           ws.send('ping');
+          // Subscription filters stay on the authenticated gateway connection and
+          // are never propagated to the Redis broker.
+          ws.send(JSON.stringify({ type: 'subscribe', filters: { event_types: ['mcp_event', 'security_correlation'] } }));
         } catch {}
       };
 
@@ -196,7 +199,7 @@ export const useLiveTraffic = (
               total_blocked: message.data.total_blocked || 0,
               total_anomalies: message.data.total_anomalies || 0,
             });
-          } else if (message.type === 'mcp_event' || message.type === 'new_request') {
+          } else if (message.type === 'mcp_event' || message.type === 'new_request' || message.type === 'security_correlation') {
             const newEvent = normalizeTrafficEvent(message.data);
             if (!newEvent) {
               console.error('[Sentinel WS] Invalid traffic event payload:', message.data);

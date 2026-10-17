@@ -5,20 +5,1471 @@
     "sql/query": "query_tool"
   },
   "indicators": [
-    {"id":"SQLI-001","name":"Tautology","description":"Always-true comparison in an SQL-like expression.","severity":"high","category":"tautology","recommendation":"Use parameterized queries and reject user-controlled SQL fragments.","patterns":["(?:['\\\"]\\s*)?(?:or|and)\\s+(?:1\\s*=\\s*1|'[^']{1,24}'\\s*=\\s*'[^']{1,24}'|\\\"[^\\\"]{1,24}\\\"\\s*=\\s*\\\"[^\\\"]{1,24}\\\")"]},
-    {"id":"SQLI-002","name":"Comment truncation","description":"Quote or parenthesis followed by a SQL comment marker.","severity":"medium","category":"comment_truncation","recommendation":"Use parameterized queries and reject comment-based query suffixes.","patterns":["['\\\") ]\\s*(?:--(?:\\s|$)|#(?:\\s|$)|/\\*)"]},
-    {"id":"SQLI-003","name":"UNION-based injection","description":"UNION or UNION ALL followed by SELECT.","severity":"high","category":"union","recommendation":"Use parameterized queries and do not concatenate user input into SELECT statements.","patterns":["\\bunion(?:\\s+all)?\\s+select\\b"]},
-    {"id":"SQLI-004","name":"Stacked query","description":"A semicolon followed by a second SQL statement.","severity":"high","category":"stacked_query","recommendation":"Reject multiple statements and use a driver that disables multi-statement execution.","patterns":[";\\s*(?:drop|delete|insert|update|alter|exec(?:ute)?)\\b"]},
-    {"id":"SQLI-005","name":"Destructive statement","description":"Destructive DDL/DML, including DELETE without WHERE.","severity":"high","category":"destructive_statement","recommendation":"Restrict destructive SQL and require explicit, separately authorized operations.","patterns":["\\bdrop\\s+(?:table|database)\\b","\\btruncate(?:\\s+table)?\\b","\\bdelete\\s+from\\b(?![^;]{0,200}\\bwhere\\b)","\\balter\\s+user\\b"]},
-    {"id":"SQLI-006","name":"Time-based blind SQLi","description":"Database delay functions used to infer query results.","severity":"high","category":"time_based","recommendation":"Reject delay functions in user-controlled queries and use parameterized statements.","patterns":["\\b(?:sleep|benchmark|pg_sleep)\\s*\\(","\\bwaitfor\\s+delay\\b"]},
-    {"id":"SQLI-007","name":"Error-based SQLi","description":"Database XML/error functions or casts around subqueries.","severity":"medium","category":"error_based","recommendation":"Use parameterized queries and avoid returning database errors to callers.","patterns":["\\b(?:extractvalue|updatexml)\\s*\\(","\\bconvert\\s*\\(\\s*int\\s*,","\\bcast\\s*\\([^)]{1,160}\\bas\\b[^)]{0,160}\\bselect\\b"]},
-    {"id":"SQLI-008","name":"Schema probing","description":"References to database catalog or account tables.","severity":"high","category":"schema_probe","recommendation":"Deny access to system catalogs unless explicitly required by the tool.","patterns":["\\b(?:information_schema|sqlite_master|pg_catalog|mysql\\.user|sys\\.tables)\\b"]},
-    {"id":"SQLI-009","name":"Boolean-blind probing","description":"Boolean comparison or string extraction used as a conditional probe.","severity":"medium","category":"boolean_probe","recommendation":"Use parameterized queries and avoid exposing query-result differences to untrusted callers.","patterns":["\\band\\s+[12]\\s*=\\s*[12]\\b","\\b(?:substring|ascii)\\s*\\([^)]{1,160}\\)\\s*(?:=|<>|>|<|between)\\s*(?:'[^']{0,24}'|\\d{1,4})","\\bascii\\s*\\(\\s*substring\\s*\\([^)]{1,160}\\)\\s*\\)\\s*(?:=|<>|>|<|between)\\s*(?:'[^']{0,24}'|\\d{1,4})"]},
-    {"id":"SQLI-010","name":"Dangerous database function","description":"File access, command execution, or COPY PROGRAM functionality.","severity":"high","category":"dangerous_function","recommendation":"Disable database file and command-execution functions for application accounts.","patterns":["\\bload_file\\s*\\(","\\binto\\s+(?:out|dump)file\\b","\\bxp_cmdshell\\b","\\bcopy\\s+[\\w.\\\"` ]{1,100}\\s+from\\s+program\\b"]},
-    {"id":"SQLI-011","name":"Encoding evasion","description":"Heavy percent encoding, SQL-context hex values, or CHAR/CHR chains.","severity":"medium","category":"encoding_evasion","recommendation":"Canonicalize input once and bind values instead of decoding SQL fragments.","matcher":"encoding_evasion"},
-    {"id":"SQLI-012","name":"Quote anomaly","description":"Unbalanced quotes alongside multiple SQL keywords.","severity":"low","category":"quote_anomaly","recommendation":"Validate expected input types and use bound parameters.","matcher":"quote_anomaly"},
-    {"id":"SQLI-013","name":"SQL keyword density","description":"Several distinct SQL keywords in a field not configured for SQL.","severity":"low","category":"keyword_density","recommendation":"Treat identifiers and free-text fields as values, not query fragments.","matcher":"keyword_density"},
-    {"id":"SQLI-014","name":"Read-only mode violation","description":"Non-SELECT SQL submitted to a read-only tool.","severity":"high","category":"readonly_violation","recommendation":"Use a read-only database role and permit only a single SELECT statement.","matcher":"readonly_violation"},
-    {"id":"SQLI-015","name":"Oversized input","description":"Input exceeded the SQL analysis size limit and was truncated.","severity":"low","category":"input_limit","recommendation":"Keep tool arguments within documented size limits.","matcher":"oversized"}
+    {
+      "id": "SQLI-001",
+      "name": "Tautology",
+      "description": "Always-true comparison in an SQL-like expression.",
+      "severity": "high",
+      "category": "tautology",
+      "recommendation": "Use parameterized queries and reject user-controlled SQL fragments.",
+      "patterns": [
+        "(?:['\\\"]\\s*)?(?:or|and)\\s+(?:1\\s*=\\s*1|'[^']{1,24}'\\s*=\\s*'[^']{1,24}'|\\\"[^\\\"]{1,24}\\\"\\s*=\\s*\\\"[^\\\"]{1,24}\\\")"
+      ]
+    },
+    {
+      "id": "SQLI-002",
+      "name": "Comment truncation",
+      "description": "Quote or parenthesis followed by a SQL comment marker.",
+      "severity": "medium",
+      "category": "comment_truncation",
+      "recommendation": "Use parameterized queries and reject comment-based query suffixes.",
+      "patterns": [
+        "['\\\") ]\\s*(?:--(?:\\s|$)|#(?:\\s|$)|/\\*)"
+      ]
+    },
+    {
+      "id": "SQLI-003",
+      "name": "UNION-based injection",
+      "description": "UNION or UNION ALL followed by SELECT.",
+      "severity": "high",
+      "category": "union",
+      "recommendation": "Use parameterized queries and do not concatenate user input into SELECT statements.",
+      "patterns": [
+        "\\bunion(?:\\s+all)?\\s+select\\b"
+      ]
+    },
+    {
+      "id": "SQLI-004",
+      "name": "Stacked query",
+      "description": "A semicolon followed by a second SQL statement.",
+      "severity": "high",
+      "category": "stacked_query",
+      "recommendation": "Reject multiple statements and use a driver that disables multi-statement execution.",
+      "patterns": [
+        ";\\s*(?:drop|delete|insert|update|alter|exec(?:ute)?)\\b"
+      ]
+    },
+    {
+      "id": "SQLI-005",
+      "name": "Destructive statement",
+      "description": "Destructive DDL/DML, including DELETE without WHERE.",
+      "severity": "high",
+      "category": "destructive_statement",
+      "recommendation": "Restrict destructive SQL and require explicit, separately authorized operations.",
+      "patterns": [
+        "\\bdrop\\s+(?:table|database)\\b",
+        "\\btruncate(?:\\s+table)?\\b",
+        "\\bdelete\\s+from\\b(?![^;]{0,200}\\bwhere\\b)",
+        "\\balter\\s+user\\b"
+      ]
+    },
+    {
+      "id": "SQLI-006",
+      "name": "Time-based blind SQLi",
+      "description": "Database delay functions used to infer query results.",
+      "severity": "high",
+      "category": "time_based",
+      "recommendation": "Reject delay functions in user-controlled queries and use parameterized statements.",
+      "patterns": [
+        "\\b(?:sleep|benchmark|pg_sleep)\\s*\\(",
+        "\\bwaitfor\\s+delay\\b"
+      ]
+    },
+    {
+      "id": "SQLI-007",
+      "name": "Error-based SQLi",
+      "description": "Database XML/error functions or casts around subqueries.",
+      "severity": "medium",
+      "category": "error_based",
+      "recommendation": "Use parameterized queries and avoid returning database errors to callers.",
+      "patterns": [
+        "\\b(?:extractvalue|updatexml)\\s*\\(",
+        "\\bconvert\\s*\\(\\s*int\\s*,",
+        "\\bcast\\s*\\([^)]{1,160}\\bas\\b[^)]{0,160}\\bselect\\b"
+      ]
+    },
+    {
+      "id": "SQLI-008",
+      "name": "Schema probing",
+      "description": "References to database catalog or account tables.",
+      "severity": "high",
+      "category": "schema_probe",
+      "recommendation": "Deny access to system catalogs unless explicitly required by the tool.",
+      "patterns": [
+        "\\b(?:information_schema|sqlite_master|pg_catalog|mysql\\.user|sys\\.tables)\\b"
+      ]
+    },
+    {
+      "id": "SQLI-009",
+      "name": "Boolean-blind probing",
+      "description": "Boolean comparison or string extraction used as a conditional probe.",
+      "severity": "medium",
+      "category": "boolean_probe",
+      "recommendation": "Use parameterized queries and avoid exposing query-result differences to untrusted callers.",
+      "patterns": [
+        "\\band\\s+[12]\\s*=\\s*[12]\\b",
+        "\\b(?:substring|ascii)\\s*\\([^)]{1,160}\\)\\s*(?:=|<>|>|<|between)\\s*(?:'[^']{0,24}'|\\d{1,4})",
+        "\\bascii\\s*\\(\\s*substring\\s*\\([^)]{1,160}\\)\\s*\\)\\s*(?:=|<>|>|<|between)\\s*(?:'[^']{0,24}'|\\d{1,4})"
+      ]
+    },
+    {
+      "id": "SQLI-010",
+      "name": "Dangerous database function",
+      "description": "File access, command execution, or COPY PROGRAM functionality.",
+      "severity": "high",
+      "category": "dangerous_function",
+      "recommendation": "Disable database file and command-execution functions for application accounts.",
+      "patterns": [
+        "\\bload_file\\s*\\(",
+        "\\binto\\s+(?:out|dump)file\\b",
+        "\\bxp_cmdshell\\b",
+        "\\bcopy\\s+[\\w.\\\"` ]{1,100}\\s+from\\s+program\\b"
+      ]
+    },
+    {
+      "id": "SQLI-011",
+      "name": "Encoding evasion",
+      "description": "Heavy percent encoding, SQL-context hex values, or CHAR/CHR chains.",
+      "severity": "medium",
+      "category": "encoding_evasion",
+      "recommendation": "Canonicalize input once and bind values instead of decoding SQL fragments.",
+      "matcher": "encoding_evasion"
+    },
+    {
+      "id": "SQLI-012",
+      "name": "Quote anomaly",
+      "description": "Unbalanced quotes alongside multiple SQL keywords.",
+      "severity": "low",
+      "category": "quote_anomaly",
+      "recommendation": "Validate expected input types and use bound parameters.",
+      "matcher": "quote_anomaly"
+    },
+    {
+      "id": "SQLI-013",
+      "name": "SQL keyword density",
+      "description": "Several distinct SQL keywords in a field not configured for SQL.",
+      "severity": "low",
+      "category": "keyword_density",
+      "recommendation": "Treat identifiers and free-text fields as values, not query fragments.",
+      "matcher": "keyword_density"
+    },
+    {
+      "id": "SQLI-014",
+      "name": "Read-only mode violation",
+      "description": "Non-SELECT SQL submitted to a read-only tool.",
+      "severity": "high",
+      "category": "readonly_violation",
+      "recommendation": "Use a read-only database role and permit only a single SELECT statement.",
+      "matcher": "readonly_violation"
+    },
+    {
+      "id": "SQLI-015",
+      "name": "Oversized input",
+      "description": "Input exceeded the SQL analysis size limit and was truncated.",
+      "severity": "low",
+      "category": "input_limit",
+      "recommendation": "Keep tool arguments within documented size limits.",
+      "matcher": "oversized"
+    },
+    {
+      "id": "SQLI-016",
+      "name": "PostgreSQL: pg_read_file",
+      "description": "Database-specific capability or metadata reference for PostgreSQL; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "postgresql_capability",
+      "recommendation": "Keep pg_read_file unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpg_read_file\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-017",
+      "name": "PostgreSQL: pg_read_binary_file",
+      "description": "Database-specific capability or metadata reference for PostgreSQL; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "postgresql_capability",
+      "recommendation": "Keep pg_read_binary_file unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpg_read_binary_file\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-018",
+      "name": "PostgreSQL: pg_ls_dir",
+      "description": "Database-specific capability or metadata reference for PostgreSQL; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "postgresql_capability",
+      "recommendation": "Keep pg_ls_dir unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpg_ls_dir\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-019",
+      "name": "PostgreSQL: pg_stat_file",
+      "description": "Database-specific capability or metadata reference for PostgreSQL; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "postgresql_capability",
+      "recommendation": "Keep pg_stat_file unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpg_stat_file\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-020",
+      "name": "PostgreSQL: pg_log_backend_memory_contexts",
+      "description": "Database-specific capability or metadata reference for PostgreSQL; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "postgresql_capability",
+      "recommendation": "Keep pg_log_backend_memory_contexts unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpg_log_backend_memory_contexts\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-021",
+      "name": "PostgreSQL: dblink",
+      "description": "Database-specific capability or metadata reference for PostgreSQL; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "postgresql_capability",
+      "recommendation": "Keep dblink unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bdblink\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-022",
+      "name": "PostgreSQL: lo_import",
+      "description": "Database-specific capability or metadata reference for PostgreSQL; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "postgresql_capability",
+      "recommendation": "Keep lo_import unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\blo_import\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-023",
+      "name": "PostgreSQL: lo_export",
+      "description": "Database-specific capability or metadata reference for PostgreSQL; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "postgresql_capability",
+      "recommendation": "Keep lo_export unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\blo_export\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-024",
+      "name": "PostgreSQL: pg_largeobject",
+      "description": "Database-specific capability or metadata reference for PostgreSQL; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "postgresql_capability",
+      "recommendation": "Keep pg_largeobject unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpg_largeobject\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-025",
+      "name": "PostgreSQL: pg_authid",
+      "description": "Database-specific capability or metadata reference for PostgreSQL; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "postgresql_capability",
+      "recommendation": "Keep pg_authid unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpg_authid\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-026",
+      "name": "PostgreSQL: pg_shadow",
+      "description": "Database-specific capability or metadata reference for PostgreSQL; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "postgresql_capability",
+      "recommendation": "Keep pg_shadow unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpg_shadow\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-027",
+      "name": "PostgreSQL: pg_user_mappings",
+      "description": "Database-specific capability or metadata reference for PostgreSQL; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "postgresql_capability",
+      "recommendation": "Keep pg_user_mappings unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpg_user_mappings\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-028",
+      "name": "PostgreSQL: pg_database",
+      "description": "Database-specific capability or metadata reference for PostgreSQL; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "postgresql_capability",
+      "recommendation": "Keep pg_database unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpg_database\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-029",
+      "name": "PostgreSQL: pg_roles",
+      "description": "Database-specific capability or metadata reference for PostgreSQL; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "postgresql_capability",
+      "recommendation": "Keep pg_roles unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpg_roles\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-030",
+      "name": "PostgreSQL: pg_settings",
+      "description": "Database-specific capability or metadata reference for PostgreSQL; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "postgresql_capability",
+      "recommendation": "Keep pg_settings unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpg_settings\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-031",
+      "name": "Microsoft SQL Server: openrowset",
+      "description": "Database-specific capability or metadata reference for Microsoft SQL Server; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "mssql_capability",
+      "recommendation": "Keep openrowset unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bopenrowset\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-032",
+      "name": "Microsoft SQL Server: opendatasource",
+      "description": "Database-specific capability or metadata reference for Microsoft SQL Server; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "mssql_capability",
+      "recommendation": "Keep opendatasource unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bopendatasource\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-033",
+      "name": "Microsoft SQL Server: xp_regread",
+      "description": "Database-specific capability or metadata reference for Microsoft SQL Server; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "mssql_capability",
+      "recommendation": "Keep xp_regread unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bxp_regread\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-034",
+      "name": "Microsoft SQL Server: xp_regwrite",
+      "description": "Database-specific capability or metadata reference for Microsoft SQL Server; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "mssql_capability",
+      "recommendation": "Keep xp_regwrite unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bxp_regwrite\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-035",
+      "name": "Microsoft SQL Server: xp_dirtree",
+      "description": "Database-specific capability or metadata reference for Microsoft SQL Server; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "mssql_capability",
+      "recommendation": "Keep xp_dirtree unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bxp_dirtree\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-036",
+      "name": "Microsoft SQL Server: xp_fileexist",
+      "description": "Database-specific capability or metadata reference for Microsoft SQL Server; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "mssql_capability",
+      "recommendation": "Keep xp_fileexist unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bxp_fileexist\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-037",
+      "name": "Microsoft SQL Server: xp_subdirs",
+      "description": "Database-specific capability or metadata reference for Microsoft SQL Server; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "mssql_capability",
+      "recommendation": "Keep xp_subdirs unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bxp_subdirs\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-038",
+      "name": "Microsoft SQL Server: sp_oacreate",
+      "description": "Database-specific capability or metadata reference for Microsoft SQL Server; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "mssql_capability",
+      "recommendation": "Keep sp_oacreate unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsp_oacreate\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-039",
+      "name": "Microsoft SQL Server: sp_oamethod",
+      "description": "Database-specific capability or metadata reference for Microsoft SQL Server; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "mssql_capability",
+      "recommendation": "Keep sp_oamethod unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsp_oamethod\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-040",
+      "name": "Microsoft SQL Server: sp_oagetproperty",
+      "description": "Database-specific capability or metadata reference for Microsoft SQL Server; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "mssql_capability",
+      "recommendation": "Keep sp_oagetproperty unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsp_oagetproperty\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-041",
+      "name": "Microsoft SQL Server: sp_oasetproperty",
+      "description": "Database-specific capability or metadata reference for Microsoft SQL Server; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "mssql_capability",
+      "recommendation": "Keep sp_oasetproperty unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsp_oasetproperty\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-042",
+      "name": "Microsoft SQL Server: fn_xe_file_target_read_file",
+      "description": "Database-specific capability or metadata reference for Microsoft SQL Server; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "mssql_capability",
+      "recommendation": "Keep fn_xe_file_target_read_file unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bfn_xe_file_target_read_file\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-043",
+      "name": "Microsoft SQL Server: sys.sql_logins",
+      "description": "Database-specific capability or metadata reference for Microsoft SQL Server; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "mssql_capability",
+      "recommendation": "Keep sys.sql_logins unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsys\\.sql_logins\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-044",
+      "name": "Microsoft SQL Server: sys.server_principals",
+      "description": "Database-specific capability or metadata reference for Microsoft SQL Server; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "mssql_capability",
+      "recommendation": "Keep sys.server_principals unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsys\\.server_principals\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-045",
+      "name": "Microsoft SQL Server: sys.credentials",
+      "description": "Database-specific capability or metadata reference for Microsoft SQL Server; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "mssql_capability",
+      "recommendation": "Keep sys.credentials unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsys\\.credentials\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-046",
+      "name": "Oracle: utl_http",
+      "description": "Database-specific capability or metadata reference for Oracle; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "oracle_capability",
+      "recommendation": "Keep utl_http unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\butl_http\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-047",
+      "name": "Oracle: utl_inaddr",
+      "description": "Database-specific capability or metadata reference for Oracle; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "oracle_capability",
+      "recommendation": "Keep utl_inaddr unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\butl_inaddr\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-048",
+      "name": "Oracle: utl_file",
+      "description": "Database-specific capability or metadata reference for Oracle; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "oracle_capability",
+      "recommendation": "Keep utl_file unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\butl_file\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-049",
+      "name": "Oracle: dbms_ldap",
+      "description": "Database-specific capability or metadata reference for Oracle; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "oracle_capability",
+      "recommendation": "Keep dbms_ldap unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bdbms_ldap\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-050",
+      "name": "Oracle: dbms_java",
+      "description": "Database-specific capability or metadata reference for Oracle; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "oracle_capability",
+      "recommendation": "Keep dbms_java unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bdbms_java\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-051",
+      "name": "Oracle: dbms_pipe",
+      "description": "Database-specific capability or metadata reference for Oracle; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "oracle_capability",
+      "recommendation": "Keep dbms_pipe unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bdbms_pipe\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-052",
+      "name": "Oracle: dbms_xmlgen",
+      "description": "Database-specific capability or metadata reference for Oracle; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "oracle_capability",
+      "recommendation": "Keep dbms_xmlgen unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bdbms_xmlgen\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-053",
+      "name": "Oracle: dbms_sql",
+      "description": "Database-specific capability or metadata reference for Oracle; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "oracle_capability",
+      "recommendation": "Keep dbms_sql unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bdbms_sql\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-054",
+      "name": "Oracle: dba_users",
+      "description": "Database-specific capability or metadata reference for Oracle; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "oracle_capability",
+      "recommendation": "Keep dba_users unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bdba_users\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-055",
+      "name": "Oracle: all_users",
+      "description": "Database-specific capability or metadata reference for Oracle; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "oracle_capability",
+      "recommendation": "Keep all_users unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\ball_users\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-056",
+      "name": "Oracle: user_tab_privs",
+      "description": "Database-specific capability or metadata reference for Oracle; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "oracle_capability",
+      "recommendation": "Keep user_tab_privs unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\buser_tab_privs\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-057",
+      "name": "Oracle: v$session",
+      "description": "Database-specific capability or metadata reference for Oracle; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "oracle_capability",
+      "recommendation": "Keep v$session unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bv\\$session\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-058",
+      "name": "Oracle: v$parameter",
+      "description": "Database-specific capability or metadata reference for Oracle; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "oracle_capability",
+      "recommendation": "Keep v$parameter unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bv\\$parameter\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-059",
+      "name": "Oracle: xmltype",
+      "description": "Database-specific capability or metadata reference for Oracle; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "oracle_capability",
+      "recommendation": "Keep xmltype unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bxmltype\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-060",
+      "name": "Oracle: dbms_scheduler",
+      "description": "Database-specific capability or metadata reference for Oracle; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "oracle_capability",
+      "recommendation": "Keep dbms_scheduler unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bdbms_scheduler\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-061",
+      "name": "SQLite: load_extension",
+      "description": "Database-specific capability or metadata reference for SQLite; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "sqlite_capability",
+      "recommendation": "Keep load_extension unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bload_extension\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-062",
+      "name": "SQLite: attach database",
+      "description": "Database-specific capability or metadata reference for SQLite; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "sqlite_capability",
+      "recommendation": "Keep attach database unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\battach\\s+database\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-063",
+      "name": "SQLite: pragma writable_schema",
+      "description": "Database-specific capability or metadata reference for SQLite; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "sqlite_capability",
+      "recommendation": "Keep pragma writable_schema unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpragma\\s+writable_schema\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-064",
+      "name": "SQLite: pragma database_list",
+      "description": "Database-specific capability or metadata reference for SQLite; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "sqlite_capability",
+      "recommendation": "Keep pragma database_list unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpragma\\s+database_list\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-065",
+      "name": "SQLite: pragma table_info",
+      "description": "Database-specific capability or metadata reference for SQLite; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "sqlite_capability",
+      "recommendation": "Keep pragma table_info unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpragma\\s+table_info\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-066",
+      "name": "SQLite: sqlite_schema",
+      "description": "Database-specific capability or metadata reference for SQLite; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "sqlite_capability",
+      "recommendation": "Keep sqlite_schema unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsqlite_schema\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-067",
+      "name": "SQLite: sqlite_master",
+      "description": "Database-specific capability or metadata reference for SQLite; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "sqlite_capability",
+      "recommendation": "Keep sqlite_master unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsqlite_master\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-068",
+      "name": "SQLite: sqlite_temp_master",
+      "description": "Database-specific capability or metadata reference for SQLite; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "sqlite_capability",
+      "recommendation": "Keep sqlite_temp_master unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsqlite_temp_master\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-069",
+      "name": "SQLite: sqlite_sequence",
+      "description": "Database-specific capability or metadata reference for SQLite; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "sqlite_capability",
+      "recommendation": "Keep sqlite_sequence unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsqlite_sequence\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-070",
+      "name": "SQLite: fts3_tokenizer",
+      "description": "Database-specific capability or metadata reference for SQLite; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "sqlite_capability",
+      "recommendation": "Keep fts3_tokenizer unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bfts3_tokenizer\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-071",
+      "name": "SQLite: vacuum into",
+      "description": "Database-specific capability or metadata reference for SQLite; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "sqlite_capability",
+      "recommendation": "Keep vacuum into unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bvacuum\\s+into\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-072",
+      "name": "SQLite: pragma journal_mode",
+      "description": "Database-specific capability or metadata reference for SQLite; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "sqlite_capability",
+      "recommendation": "Keep pragma journal_mode unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpragma\\s+journal_mode\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-073",
+      "name": "SQLite: pragma compile_options",
+      "description": "Database-specific capability or metadata reference for SQLite; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "sqlite_capability",
+      "recommendation": "Keep pragma compile_options unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpragma\\s+compile_options\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-074",
+      "name": "SQLite: pragma foreign_keys",
+      "description": "Database-specific capability or metadata reference for SQLite; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "sqlite_capability",
+      "recommendation": "Keep pragma foreign_keys unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpragma\\s+foreign_keys\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-075",
+      "name": "SQLite: pragma trusted_schema",
+      "description": "Database-specific capability or metadata reference for SQLite; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "sqlite_capability",
+      "recommendation": "Keep pragma trusted_schema unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpragma\\s+trusted_schema\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-076",
+      "name": "Snowflake: get_presigned_url",
+      "description": "Database-specific capability or metadata reference for Snowflake; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "snowflake_capability",
+      "recommendation": "Keep get_presigned_url unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bget_presigned_url\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-077",
+      "name": "Snowflake: system$get_privatelink",
+      "description": "Database-specific capability or metadata reference for Snowflake; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "snowflake_capability",
+      "recommendation": "Keep system$get_privatelink unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsystem\\$get_privatelink\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-078",
+      "name": "Snowflake: system$send_snowflake_notification",
+      "description": "Database-specific capability or metadata reference for Snowflake; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "snowflake_capability",
+      "recommendation": "Keep system$send_snowflake_notification unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsystem\\$send_snowflake_notification\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-079",
+      "name": "Snowflake: execute immediate from",
+      "description": "Database-specific capability or metadata reference for Snowflake; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "snowflake_capability",
+      "recommendation": "Keep execute immediate from unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bexecute\\s+immediate\\s+from\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-080",
+      "name": "Snowflake: copy into @",
+      "description": "Database-specific capability or metadata reference for Snowflake; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "snowflake_capability",
+      "recommendation": "Keep copy into @ unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "copy\\s+into\\s+@"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-081",
+      "name": "Snowflake: list @",
+      "description": "Database-specific capability or metadata reference for Snowflake; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "snowflake_capability",
+      "recommendation": "Keep list @ unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "list\\s+@"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-082",
+      "name": "Snowflake: remove @",
+      "description": "Database-specific capability or metadata reference for Snowflake; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "snowflake_capability",
+      "recommendation": "Keep remove @ unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "remove\\s+@"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-083",
+      "name": "Snowflake: put file://",
+      "description": "Database-specific capability or metadata reference for Snowflake; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "snowflake_capability",
+      "recommendation": "Keep put file:// unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "put\\s+file://"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-084",
+      "name": "Snowflake: get @",
+      "description": "Database-specific capability or metadata reference for Snowflake; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "snowflake_capability",
+      "recommendation": "Keep get @ unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "get\\s+@"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-085",
+      "name": "Snowflake: external_access_integrations",
+      "description": "Database-specific capability or metadata reference for Snowflake; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "snowflake_capability",
+      "recommendation": "Keep external_access_integrations unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bexternal_access_integrations\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-086",
+      "name": "Snowflake: secrets",
+      "description": "Database-specific capability or metadata reference for Snowflake; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "snowflake_capability",
+      "recommendation": "Keep secrets unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsecrets\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-087",
+      "name": "Snowflake: network_rules",
+      "description": "Database-specific capability or metadata reference for Snowflake; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "snowflake_capability",
+      "recommendation": "Keep network_rules unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bnetwork_rules\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-088",
+      "name": "Snowflake: external functions",
+      "description": "Database-specific capability or metadata reference for Snowflake; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "snowflake_capability",
+      "recommendation": "Keep external functions unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bexternal\\s+functions\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-089",
+      "name": "Snowflake: javascript stored procedures",
+      "description": "Database-specific capability or metadata reference for Snowflake; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "snowflake_capability",
+      "recommendation": "Keep javascript stored procedures unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bjavascript\\s+stored\\s+procedures\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-090",
+      "name": "Snowflake: snowflake.account_usage",
+      "description": "Database-specific capability or metadata reference for Snowflake; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "snowflake_capability",
+      "recommendation": "Keep snowflake.account_usage unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsnowflake\\.account_usage\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-091",
+      "name": "Amazon Redshift: unload",
+      "description": "Database-specific capability or metadata reference for Amazon Redshift; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "redshift_capability",
+      "recommendation": "Keep unload unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bunload\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-092",
+      "name": "Amazon Redshift: copy from 's3",
+      "description": "Database-specific capability or metadata reference for Amazon Redshift; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "redshift_capability",
+      "recommendation": "Keep copy from 's3 unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bcopy\\s+from\\s+'s3\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-093",
+      "name": "Amazon Redshift: stv_recents",
+      "description": "Database-specific capability or metadata reference for Amazon Redshift; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "redshift_capability",
+      "recommendation": "Keep stv_recents unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bstv_recents\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-094",
+      "name": "Amazon Redshift: stl_query",
+      "description": "Database-specific capability or metadata reference for Amazon Redshift; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "redshift_capability",
+      "recommendation": "Keep stl_query unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bstl_query\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-095",
+      "name": "Amazon Redshift: svv_users",
+      "description": "Database-specific capability or metadata reference for Amazon Redshift; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "redshift_capability",
+      "recommendation": "Keep svv_users unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsvv_users\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-096",
+      "name": "Amazon Redshift: pg_user",
+      "description": "Database-specific capability or metadata reference for Amazon Redshift; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "redshift_capability",
+      "recommendation": "Keep pg_user unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpg_user\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-097",
+      "name": "Amazon Redshift: cancel",
+      "description": "Database-specific capability or metadata reference for Amazon Redshift; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "redshift_capability",
+      "recommendation": "Keep cancel unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bcancel\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-098",
+      "name": "Amazon Redshift: alter user",
+      "description": "Database-specific capability or metadata reference for Amazon Redshift; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "redshift_capability",
+      "recommendation": "Keep alter user unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\balter\\s+user\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-099",
+      "name": "Amazon Redshift: create user",
+      "description": "Database-specific capability or metadata reference for Amazon Redshift; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "redshift_capability",
+      "recommendation": "Keep create user unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bcreate\\s+user\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-100",
+      "name": "Amazon Redshift: create group",
+      "description": "Database-specific capability or metadata reference for Amazon Redshift; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "redshift_capability",
+      "recommendation": "Keep create group unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bcreate\\s+group\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-101",
+      "name": "Amazon Redshift: grant role",
+      "description": "Database-specific capability or metadata reference for Amazon Redshift; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "redshift_capability",
+      "recommendation": "Keep grant role unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bgrant\\s+role\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-102",
+      "name": "Amazon Redshift: set session authorization",
+      "description": "Database-specific capability or metadata reference for Amazon Redshift; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "redshift_capability",
+      "recommendation": "Keep set session authorization unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bset\\s+session\\s+authorization\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-103",
+      "name": "Amazon Redshift: pg_catalog",
+      "description": "Database-specific capability or metadata reference for Amazon Redshift; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "redshift_capability",
+      "recommendation": "Keep pg_catalog unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bpg_catalog\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-104",
+      "name": "Amazon Redshift: sys_query_history",
+      "description": "Database-specific capability or metadata reference for Amazon Redshift; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "redshift_capability",
+      "recommendation": "Keep sys_query_history unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsys_query_history\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-105",
+      "name": "Amazon Redshift: execute command",
+      "description": "Database-specific capability or metadata reference for Amazon Redshift; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "redshift_capability",
+      "recommendation": "Keep execute command unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bexecute\\s+command\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-106",
+      "name": "Google BigQuery: external_query",
+      "description": "Database-specific capability or metadata reference for Google BigQuery; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "bigquery_capability",
+      "recommendation": "Keep external_query unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bexternal_query\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-107",
+      "name": "Google BigQuery: ml.predict",
+      "description": "Database-specific capability or metadata reference for Google BigQuery; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "bigquery_capability",
+      "recommendation": "Keep ml.predict unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bml\\.predict\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-108",
+      "name": "Google BigQuery: information_schema.jobs",
+      "description": "Database-specific capability or metadata reference for Google BigQuery; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "bigquery_capability",
+      "recommendation": "Keep information_schema.jobs unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\binformation_schema\\.jobs\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-109",
+      "name": "Google BigQuery: export data",
+      "description": "Database-specific capability or metadata reference for Google BigQuery; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "bigquery_capability",
+      "recommendation": "Keep export data unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bexport\\s+data\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-110",
+      "name": "Google BigQuery: create external table",
+      "description": "Database-specific capability or metadata reference for Google BigQuery; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "bigquery_capability",
+      "recommendation": "Keep create external table unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bcreate\\s+external\\s+table\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-111",
+      "name": "Google BigQuery: remote functions",
+      "description": "Database-specific capability or metadata reference for Google BigQuery; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "bigquery_capability",
+      "recommendation": "Keep remote functions unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bremote\\s+functions\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-112",
+      "name": "Google BigQuery: execute immediate",
+      "description": "Database-specific capability or metadata reference for Google BigQuery; review use from untrusted tool input.",
+      "severity": "high",
+      "category": "bigquery_capability",
+      "recommendation": "Keep execute immediate unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bexecute\\s+immediate\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-113",
+      "name": "Google BigQuery: session_user",
+      "description": "Database-specific capability or metadata reference for Google BigQuery; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "bigquery_capability",
+      "recommendation": "Keep session_user unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bsession_user\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-114",
+      "name": "Google BigQuery: current_project",
+      "description": "Database-specific capability or metadata reference for Google BigQuery; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "bigquery_capability",
+      "recommendation": "Keep current_project unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\bcurrent_project\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    },
+    {
+      "id": "SQLI-115",
+      "name": "Google BigQuery: table wildcard functions",
+      "description": "Database-specific capability or metadata reference for Google BigQuery; review use from untrusted tool input.",
+      "severity": "medium",
+      "category": "bigquery_capability",
+      "recommendation": "Keep table wildcard functions unavailable to untrusted input and restrict the database role to required operations.",
+      "patterns": [
+        "\\btable\\s+wildcard\\s+functions\\b"
+      ],
+      "query_tool": true,
+      "enabled": false
+    }
   ]
 }

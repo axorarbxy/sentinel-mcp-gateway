@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Avatar, Box, Card, CardContent, Chip, Divider, Grid, IconButton, LinearProgress, Paper, Tooltip, Typography } from '@mui/material';
 import { Block as BlockIcon, CheckCircle as CheckCircleIcon, ErrorOutlined as ErrorIcon, Hub as HubIcon, Refresh as RefreshIcon, Security as SecurityIcon, Timeline as TimelineIcon, Warning as WarningIcon } from '@mui/icons-material';
-import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from 'recharts';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from 'recharts';
 import { gatewayApi } from '../services/api';
 import { LogEntry, StatsResponse } from '../types';
 import useLiveTraffic, { TrafficEvent } from '../hooks/useLiveTraffic';
@@ -17,6 +17,7 @@ const DETECTION_CATEGORIES = [
   { name: 'Other gateway rules', color: '#78909c' },
 ];
 const API_URL = 'http://localhost:8001';
+const chartTooltipStyle = { backgroundColor: '#101822', border: '1px solid rgba(154,175,193,.2)', borderRadius: 10, color: '#F3F7FA' };
 
 interface MCPOverview {
   agents: { total: number; active: number; inactive: number };
@@ -92,6 +93,16 @@ const Dashboard: React.FC = () => {
     }));
   }, [stats]);
 
+  const methodDistribution = useMemo(() => Object.entries(stats?.methods || {})
+    .map(([method, count]) => ({ method, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8), [stats]);
+
+  const requestOutcomes = useMemo(() => [
+    { name: 'Allowed', value: Math.max(0, (stats?.total_requests || 0) - (stats?.blocked || 0)), color: '#26a69a' },
+    { name: 'Blocked', value: stats?.blocked || 0, color: '#ef5350' },
+  ], [stats]);
+
   if (loading) return <LinearProgress sx={{ mt: 4 }} />;
   if (error || !stats) return <Paper sx={{ p: 4, m: 3, textAlign: 'center' }}><ErrorIcon color="error" sx={{ fontSize: 44 }} /><Typography variant="h6" sx={{ mt: 1 }}>{error || 'Gateway data is unavailable.'}</Typography><IconButton aria-label="Retry" onClick={fetchData}><RefreshIcon /></IconButton></Paper>;
 
@@ -131,25 +142,42 @@ const Dashboard: React.FC = () => {
     </Paper>
 
     <Grid container spacing={3} sx={{ mb: 3 }}>
-      <Grid size={{ xs: 12, md: 7 }}><Paper sx={{ p: 3, height: 360 }}><Typography variant="h6">Traffic observed by the gateway</Typography><Typography variant="caption" color="text.secondary">Persisted request events · last 24 hours</Typography>{traffic.length ? <ResponsiveContainer width="100%" height={270}><AreaChart data={traffic}><defs><linearGradient id="events" x1="0" x2="0" y1="0" y2="1"><stop offset="5%" stopColor="#D56B82" stopOpacity={.45}/><stop offset="95%" stopColor="#D56B82" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="time" /><YAxis allowDecimals={false} /><ChartTooltip /><Area type="monotone" dataKey="events" stroke="#D56B82" fill="url(#events)" name="Events" /><Area type="monotone" dataKey="blocked" stroke="#ef5350" fill="none" name="Blocked" /></AreaChart></ResponsiveContainer> : <Box sx={{ height: 260, display: 'grid', placeItems: 'center' }}><Typography color="text.secondary">No traffic has been recorded yet.</Typography></Box>}</Paper></Grid>
-      <Grid size={{ xs: 12, md: 5 }}><Paper sx={{ p: 3, minHeight: 440 }}><Typography variant="h6">Detection categories</Typography><Typography variant="caption" color="text.secondary">All retained blocked and flagged events. Category counts can overlap; zero-count categories remain visible.</Typography><ResponsiveContainer width="100%" height={200}><PieChart><Pie data={detections.filter((item) => item.value > 0)} dataKey="value" nameKey="name" innerRadius={50} outerRadius={78}>{detections.filter((item) => item.value > 0).map((item) => <Cell key={item.name} fill={item.color} />)}</Pie><ChartTooltip /></PieChart></ResponsiveContainer>{detections.map((item) => <Box key={item.name} sx={{ display: 'flex', justifyContent: 'space-between', py: .25 }}><Typography variant="body2"><Box component="span" sx={{ color: item.color }}>● </Box>{item.name}</Typography><Typography variant="body2" sx={{ fontWeight: 700 }}>{item.value}</Typography></Box>)}</Paper></Grid>
+      <Grid size={{ xs: 12, md: 7 }}><Paper sx={{ p: 3, height: 440 }}><Typography variant="h6">Traffic observed by the gateway</Typography><Typography variant="caption" color="text.secondary">Persisted request events · last 24 hours</Typography>{traffic.length ? <ResponsiveContainer width="100%" height={350}><AreaChart data={traffic}><defs><linearGradient id="events" x1="0" x2="0" y1="0" y2="1"><stop offset="5%" stopColor="#D56B82" stopOpacity={.45}/><stop offset="95%" stopColor="#D56B82" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="time" /><YAxis allowDecimals={false} /><ChartTooltip contentStyle={chartTooltipStyle} /><Legend /><Area type="monotone" dataKey="events" stroke="#D56B82" fill="url(#events)" name="Events" /><Area type="monotone" dataKey="blocked" stroke="#ef5350" fill="none" name="Blocked" /></AreaChart></ResponsiveContainer> : <Box sx={{ height: 350, display: 'grid', placeItems: 'center' }}><Typography color="text.secondary">No traffic has been recorded yet.</Typography></Box>}</Paper></Grid>
+      <Grid size={{ xs: 12, md: 5 }}><Paper sx={{ p: 3, minHeight: 440 }}><Typography variant="h6">Detection categories</Typography><Typography variant="caption" color="text.secondary">All retained blocked and flagged events. Category counts can overlap; zero-count categories remain visible.</Typography><ResponsiveContainer width="100%" height={200}><PieChart><Pie data={detections.filter((item) => item.value > 0)} dataKey="value" nameKey="name" innerRadius={58} outerRadius={78}>{detections.filter((item) => item.value > 0).map((item) => <Cell key={item.name} fill={item.color} />)}</Pie><ChartTooltip contentStyle={chartTooltipStyle} /></PieChart></ResponsiveContainer>{detections.map((item) => <Box key={item.name} sx={{ display: 'flex', justifyContent: 'space-between', py: .25 }}><Typography variant="body2"><Box component="span" sx={{ color: item.color }}>● </Box>{item.name}</Typography><Typography variant="body2" sx={{ fontWeight: 700 }}>{item.value}</Typography></Box>)}</Paper></Grid>
     </Grid>
 
-    <Paper sx={{ p: 3, mb: 3 }}>
-      <Typography variant="h6">SQL injection blocks</Typography>
-      <Typography variant="caption" color="text.secondary">Persisted rule blocks by hour over the last 24 hours.</Typography>
-      {(stats.sqli_blocks_by_hour || []).length ? (
-        <ResponsiveContainer width="100%" height={220}>
-          <AreaChart data={stats.sqli_blocks_by_hour}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="hour" tickFormatter={(value) => new Date(value).toLocaleTimeString([], { hour: '2-digit' })} />
-            <YAxis allowDecimals={false} />
-            <ChartTooltip labelFormatter={(value) => new Date(String(value)).toLocaleString()} />
-            <Area type="monotone" dataKey="blocks" stroke="#ef5350" fill="#ef535033" name="SQLi blocks" />
-          </AreaChart>
-        </ResponsiveContainer>
-      ) : <Box sx={{ height: 180, display: 'grid', placeItems: 'center' }}><Typography color="text.secondary">No SQLi blocks recorded in the last 24 hours.</Typography></Box>}
-    </Paper>
+    <Grid container spacing={3} sx={{ mb: 3 }}>
+      <Grid size={{ xs: 12, md: 5 }}>
+        <Paper sx={{ p: 3, height: 360 }}>
+          <Typography variant="h6">Request outcomes</Typography>
+          <Typography variant="caption" color="text.secondary">Allowed and blocked requests across registered agents</Typography>
+          <ResponsiveContainer width="100%" height={245}>
+            <PieChart>
+              <Pie data={requestOutcomes} dataKey="value" nameKey="name" innerRadius={62} outerRadius={96} paddingAngle={3}>
+                {requestOutcomes.map((item) => <Cell key={item.name} fill={item.color} />)}
+              </Pie>
+              <ChartTooltip contentStyle={chartTooltipStyle} formatter={(value) => [Number(value ?? 0).toLocaleString(), 'Requests']} />
+              <Legend />
+            </PieChart>
+          </ResponsiveContainer>
+        </Paper>
+      </Grid>
+      <Grid size={{ xs: 12, md: 7 }}>
+        <Paper sx={{ p: 3, height: 360 }}>
+          <Typography variant="h6">Most used request methods</Typography>
+          <Typography variant="caption" color="text.secondary">Method distribution from gateway telemetry</Typography>
+          {methodDistribution.length ? <ResponsiveContainer width="100%" height={275}>
+            <BarChart data={methodDistribution} layout="vertical" margin={{ left: 16, right: 20, top: 8, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+              <XAxis type="number" allowDecimals={false} tick={{ fill: '#9BAAB7' }} />
+              <YAxis type="category" dataKey="method" width={120} tick={{ fill: '#CBD5DE', fontSize: 12 }} />
+              <ChartTooltip contentStyle={chartTooltipStyle} />
+              <Bar dataKey="count" name="Requests" fill="#42a5f5" radius={[0, 6, 6, 0]} />
+            </BarChart>
+          </ResponsiveContainer> : <Box sx={{ height: 275, display: 'grid', placeItems: 'center' }}><Typography color="text.secondary">Method data will appear as requests arrive.</Typography></Box>}
+        </Paper>
+      </Grid>
+    </Grid>
 
     <Paper sx={{ p: 3 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>

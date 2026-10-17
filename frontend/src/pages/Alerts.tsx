@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent,
   DialogTitle, Divider, Grid, IconButton, LinearProgress, MenuItem, Paper,
-  Select, Stack, TextField, Tooltip, Typography,
+  Select, Snackbar, Stack, TextField, Tooltip, Typography,
 } from '@mui/material';
 import { CheckCircle as CheckCircleIcon, Refresh as RefreshIcon } from '@mui/icons-material';
 import { gatewayApi } from '../services/api';
@@ -22,6 +22,10 @@ const AlertsPage: React.FC = () => {
   const [severity, setSeverity] = useState('ALL');
   const [status, setStatus] = useState('ACTIVE');
   const [selected, setSelected] = useState<Alert | null>(null);
+  const [pendingBlock, setPendingBlock] = useState<Alert | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionMessage, setActionMessage] = useState('');
+  const [actionError, setActionError] = useState('');
 
   const fetchAlerts = useCallback(async () => {
     try { const data = await gatewayApi.getAnomalies(200); setAlerts(data.alerts); }
@@ -41,11 +45,41 @@ const AlertsPage: React.FC = () => {
   const unacknowledged = alerts.filter((item) => item.status === 'NEW');
   const blocked = alerts.filter((item) => item.decision === 'BLOCK');
 
-  const updateStatus = async (next: Alert['status']) => {
-    if (!selected) return;
-    const updated = await gatewayApi.updateAlertStatus(selected.id, next);
-    setAlerts((previous) => previous.map((item) => item.id === updated.id ? updated : item));
-    setSelected(updated);
+  const applyAlertStatus = async (alert: Alert, next: Alert['status']) => {
+    setActionBusy(true);
+    setActionError('');
+    try {
+      const updated = await gatewayApi.updateAlertStatus(alert.id, next);
+      setAlerts((previous) => previous.map((item) => item.id === updated.id ? updated : item));
+      setSelected((current) => current?.id === updated.id ? updated : current);
+      setActionMessage(next === 'INVESTIGATING' ? 'Alert flagged for investigation.' : `Alert marked ${next.toLowerCase()}.`);
+    } catch (requestError: any) {
+      setActionError(requestError.response?.data?.detail || requestError.message || 'Could not update this alert.');
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const blockAgent = async () => {
+    if (!pendingBlock) return;
+    const alert = pendingBlock;
+    setActionBusy(true);
+    setActionError('');
+    try {
+      const agents = await gatewayApi.getMcpAgents();
+      const agent = agents.find((item) => item.name.toLowerCase() === alert.agent_id.toLowerCase());
+      if (!agent) throw new Error(`Could not find registered agent “${alert.agent_id}”.`);
+      if (agent.status !== 'suspended') await gatewayApi.suspendMcpAgent(agent.id);
+      const updated = await gatewayApi.updateAlertStatus(alert.id, 'CONTAINED');
+      setAlerts((previous) => previous.map((item) => item.id === updated.id ? updated : item));
+      setSelected((current) => current?.id === updated.id ? updated : current);
+      setPendingBlock(null);
+      setActionMessage(`Agent ${agent.name} suspended; alert marked contained.`);
+    } catch (requestError: any) {
+      setActionError(requestError.response?.data?.detail || requestError.message || 'Could not block this agent.');
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   if (loading) return <LinearProgress sx={{ mt: 4 }} />;
@@ -61,9 +95,21 @@ const AlertsPage: React.FC = () => {
     <Grid container spacing={2} sx={{ mb: 3 }}>{cards.map(([label, value, hint, color]) => <Grid key={label as string} size={{ xs: 12, sm: 6, md: 3 }}><Card sx={{ borderTop: `3px solid ${color}` }}><CardContent><Typography variant="overline">{label}</Typography><Typography variant="h3" sx={{ fontWeight: 700 }}>{value}</Typography><Typography variant="caption" color="text.secondary">{hint}</Typography></CardContent></Card></Grid>)}</Grid>
     <Paper sx={{ p: 2, mb: 3 }}><Typography variant="overline">Filter alerts</Typography><Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mt: 1 }}><TextField size="small" placeholder="Search agent, tool, reason, or threat" value={search} onChange={(event) => setSearch(event.target.value)} fullWidth /><Select size="small" value={severity} onChange={(event) => setSeverity(event.target.value)}><MenuItem value="ALL">All severities</MenuItem><MenuItem value="HIGH">High</MenuItem><MenuItem value="MEDIUM">Medium</MenuItem><MenuItem value="LOW">Low</MenuItem></Select><Select size="small" value={status} onChange={(event) => setStatus(event.target.value)}><MenuItem value="ACTIVE">Active</MenuItem><MenuItem value="ALL">All statuses</MenuItem>{statuses.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}</Select><Button onClick={() => { setSearch(''); setSeverity('ALL'); setStatus('ACTIVE'); }}>Clear</Button></Stack></Paper>
     <Paper sx={{ overflow: 'hidden' }}><Box sx={{ p: 2 }}><Typography variant="h6">Alert queue</Typography><Typography variant="caption" color="text.secondary">{filtered.length} correlated alerts · raw events remain retained by the gateway</Typography></Box><Divider />
-      {filtered.length ? filtered.sort((a, b) => new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime()).map((alert) => <Box key={alert.id} sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}><Chip label={alert.severity} color={severityColor(alert.severity)} /><Box sx={{ flex: 1, minWidth: 240 }}><Typography sx={{ fontWeight: 700 }}>{alert.title}</Typography><Typography variant="body2" color="text.secondary">{alert.agent_id} · {alert.evidence.method} · {alert.rule_id} · {alert.occurrence_count} occurrence{alert.occurrence_count === 1 ? '' : 's'}</Typography><Typography variant="caption" color="text.secondary">Last seen {age(alert.last_seen)} · {alert.reason}</Typography></Box><Typography sx={{ fontWeight: 700 }}>Risk {alert.risk.score}/100</Typography><Chip size="small" label={alert.status} variant="outlined" /><Chip size="small" label={alert.decision} color={alert.decision === 'BLOCK' ? 'error' : 'default'} /><Button variant="outlined" onClick={() => setSelected(alert)}>Investigate</Button></Box>) : <Box sx={{ textAlign: 'center', py: 8 }}><CheckCircleIcon color="success" sx={{ fontSize: 48 }} /><Typography>No alerts match the selected filters.</Typography></Box>}
+      {filtered.length ? filtered.sort((a, b) => new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime()).map((alert) => <Box key={alert.id} sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}><Chip label={alert.severity} color={severityColor(alert.severity)} /><Box sx={{ flex: 1, minWidth: 240 }}><Typography sx={{ fontWeight: 700 }}>{alert.title}</Typography><Typography variant="body2" color="text.secondary">{alert.agent_id} · {alert.evidence.method} · {alert.rule_id} · {alert.occurrence_count} occurrence{alert.occurrence_count === 1 ? '' : 's'}</Typography><Typography variant="caption" color="text.secondary">Last seen {age(alert.last_seen)} · {alert.reason}</Typography></Box><Typography sx={{ fontWeight: 700 }}>Risk {alert.risk.score}/100</Typography><Chip size="small" label={alert.status} variant="outlined" /><Tooltip title="This is the gateway's recorded decision for the event"><Chip size="small" label={alert.decision} color={alert.decision === 'BLOCK' ? 'error' : 'default'} /></Tooltip><Button size="small" color="error" variant="contained" disabled={actionBusy} onClick={() => setPendingBlock(alert)}>Block agent</Button><Button size="small" variant="outlined" disabled={actionBusy || alert.status === 'INVESTIGATING'} onClick={() => applyAlertStatus(alert, 'INVESTIGATING')}>Flag for review</Button><Button variant="outlined" onClick={() => setSelected(alert)}>Investigate</Button></Box>) : <Box sx={{ textAlign: 'center', py: 8 }}><CheckCircleIcon color="success" sx={{ fontSize: 48 }} /><Typography>No alerts match the selected filters.</Typography></Box>}
     </Paper>
-    <Dialog open={!!selected} onClose={() => setSelected(null)} maxWidth="md" fullWidth>{selected && <><DialogTitle>{selected.id} · {selected.title}</DialogTitle><DialogContent dividers><Stack direction="row" spacing={1} sx={{ mb: 2 }}><Chip label={selected.severity} color={severityColor(selected.severity)} /><Chip label={`Risk ${selected.risk.score}/100`} /><Chip label={selected.decision} color="error" /><Chip label={selected.status} variant="outlined" /></Stack><Grid container spacing={2}><Grid size={{ xs: 12, md: 6 }}><Typography variant="overline">Why Sentinel detected this</Typography><Typography>{selected.evidence.explanation}</Typography><Typography variant="body2" sx={{ mt: 1 }}>Rule: {selected.rule_id} · Source: {selected.type === 'rule_based' ? 'Rule engine' : 'Behavioral model'}</Typography></Grid><Grid size={{ xs: 12, md: 6 }}><Typography variant="overline">Evidence and context</Typography><Typography>Agent: {selected.agent_id}</Typography><Typography>Tool: {selected.evidence.method}</Typography><Typography>First seen: {new Date(selected.first_seen).toLocaleString()}</Typography><Typography>Last seen: {new Date(selected.last_seen).toLocaleString()}</Typography><Typography>Correlated events: {selected.occurrence_count}</Typography></Grid>{selected.evidence.sqli_findings?.length ? <Grid size={{ xs: 12 }}><Divider sx={{ my: 1 }} /><Typography variant="overline">SQL injection indicators</Typography>{selected.evidence.sqli_findings.map((finding) => <Box key={`${finding.id}-${finding.field_path}`} sx={{ py: 1, borderBottom: '1px solid', borderColor: 'divider' }}><Stack direction="row" spacing={1} sx={{ mb: .5 }}><Chip size="small" label={finding.id} /><Chip size="small" label={finding.severity} color={severityColor(finding.severity.toUpperCase())} /><Typography variant="body2">{finding.name} · {finding.field_path}</Typography></Stack><Typography variant="body2" color="text.secondary">{finding.evidence}</Typography><Typography variant="caption" color="text.secondary">{finding.recommendation}</Typography></Box>)}</Grid> : null}<Grid size={{ xs: 12 }}><Divider sx={{ my: 1 }} /><Typography variant="overline">Recommended actions</Typography><Typography>Review preceding tool activity, verify the agent’s assigned permissions, and retain {selected.rule_id} until the behavior is understood.</Typography></Grid></Grid></DialogContent><DialogActions><Select size="small" value={selected.status} onChange={(event) => updateStatus(event.target.value as Alert['status'])}>{statuses.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}</Select><Button onClick={() => setSelected(null)}>Close</Button></DialogActions></>}</Dialog>
+    <Dialog open={!!selected} onClose={() => setSelected(null)} maxWidth="md" fullWidth>{selected && <><DialogTitle>{selected.id} · {selected.title}</DialogTitle><DialogContent dividers><Stack direction="row" spacing={1} sx={{ mb: 2 }}><Chip label={selected.severity} color={severityColor(selected.severity)} /><Chip label={`Risk ${selected.risk.score}/100`} /><Chip label={selected.decision} color="error" /><Chip label={selected.status} variant="outlined" /></Stack><Grid container spacing={2}><Grid size={{ xs: 12, md: 6 }}><Typography variant="overline">Why Sentinel detected this</Typography><Typography>{selected.evidence.explanation}</Typography><Typography variant="body2" sx={{ mt: 1 }}>Rule: {selected.rule_id} · Source: {selected.type === 'rule_based' ? 'Rule engine' : 'Behavioral model'}</Typography></Grid><Grid size={{ xs: 12, md: 6 }}><Typography variant="overline">Evidence and context</Typography><Typography>Agent: {selected.agent_id}</Typography><Typography>Tool: {selected.evidence.method}</Typography><Typography>First seen: {new Date(selected.first_seen).toLocaleString()}</Typography><Typography>Last seen: {new Date(selected.last_seen).toLocaleString()}</Typography><Typography>Correlated events: {selected.occurrence_count}</Typography></Grid>{selected.evidence.sqli_findings?.length ? <Grid size={{ xs: 12 }}><Divider sx={{ my: 1 }} /><Typography variant="overline">SQL injection indicators</Typography>{selected.evidence.sqli_findings.map((finding) => <Box key={`${finding.id}-${finding.field_path}`} sx={{ py: 1, borderBottom: '1px solid', borderColor: 'divider' }}><Stack direction="row" spacing={1} sx={{ mb: .5 }}><Chip size="small" label={finding.id} /><Chip size="small" label={finding.severity} color={severityColor(finding.severity.toUpperCase())} /><Typography variant="body2">{finding.name} · {finding.field_path}</Typography></Stack><Typography variant="body2" color="text.secondary">{finding.evidence}</Typography><Typography variant="caption" color="text.secondary">{finding.recommendation}</Typography></Box>)}</Grid> : null}<Grid size={{ xs: 12 }}><Divider sx={{ my: 1 }} /><Typography variant="overline">Recommended actions</Typography><Typography>Review preceding tool activity, verify the agent’s assigned permissions, and retain {selected.rule_id} until the behavior is understood.</Typography></Grid></Grid></DialogContent><DialogActions><Select size="small" value={selected.status} onChange={(event) => applyAlertStatus(selected, event.target.value as Alert['status'])}>{statuses.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}</Select><Button onClick={() => setSelected(null)}>Close</Button></DialogActions></>}</Dialog>
+    <Dialog open={!!pendingBlock} onClose={() => !actionBusy && setPendingBlock(null)}>
+      <DialogTitle>Block this agent?</DialogTitle>
+      <DialogContent dividers>
+        <Typography>Suspending {pendingBlock?.agent_id} stops its future requests at the gateway until an operator resumes it. The alert will be marked contained.</Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setPendingBlock(null)} disabled={actionBusy}>Cancel</Button>
+        <Button color="error" variant="contained" onClick={blockAgent} disabled={actionBusy}>{actionBusy ? 'Blocking…' : 'Block agent'}</Button>
+      </DialogActions>
+    </Dialog>
+    <Snackbar open={!!actionError} autoHideDuration={6000} onClose={() => setActionError('')} message={actionError} />
+    <Snackbar open={!!actionMessage} autoHideDuration={3500} onClose={() => setActionMessage('')} message={actionMessage} />
   </Box>;
 };
 

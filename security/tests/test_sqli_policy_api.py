@@ -28,7 +28,7 @@ def test_indicator_list_and_test_endpoint_require_read_scope(gateway_client):
     headers = _headers(_read_token())
     indicators = client.get("/api/policies/sqli/indicators", headers=headers)
     assert indicators.status_code == 200
-    assert len(indicators.json()["indicators"]) == 15
+    assert len(indicators.json()["indicators"]) == 115
     result = client.post(
         "/api/policies/sqli/test",
         headers=headers,

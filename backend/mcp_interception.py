@@ -12,7 +12,7 @@ import time
 import unicodedata
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit
 
@@ -42,14 +42,23 @@ UPSTREAM_URL = os.getenv("SENTINEL_MCP_UPSTREAM_URL", "").strip()
 UPSTREAM_NAME = os.getenv("SENTINEL_MCP_UPSTREAM_NAME", "configured-upstream").strip()
 UPSTREAM_TOKEN = os.getenv("SENTINEL_MCP_UPSTREAM_TOKEN", "")
 UNKNOWN_METHOD_MODE = os.getenv("SENTINEL_MCP_UNKNOWN_METHOD_MODE", "strict").lower()
-SUPPORTED_PROTOCOL_VERSIONS = {"2025-11-25", "2026-07-28"}
+SUPPORTED_PROTOCOL_VERSIONS = {
+    "2024-11-05",
+    "2025-03-26",
+    "2025-06-18",
+    "2025-11-25",
+    "2026-07-28",
+}
 _CUSTOM_REDACTION_PATTERNS = [
     re.compile(pattern, re.IGNORECASE)
     for pattern in json.loads(os.getenv("SENTINEL_MCP_REDACTION_PATTERNS", "[]"))
 ]
 ALLOWED_ORIGINS = {
     origin.strip()
-    for origin in os.getenv("SENTINEL_CORS_ORIGINS", "http://localhost:3000").split(",")
+    for origin in os.getenv(
+        "SENTINEL_CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001",
+    ).split(",")
     if origin.strip()
 }
 
@@ -477,7 +486,7 @@ def _new_event(message: dict[str, Any], agent: dict[str, Any], session_id: str |
         environment=agent.get("environment"),
         direction="agent_to_server",
         method=message["method"],
-        upstream_server=UPSTREAM_NAME,
+        upstream_server=_upstream_name(agent),
         tool_name=tool_name,
         arguments=arguments,
         resource_uri=resource_uri,
@@ -617,10 +626,22 @@ async def _renew_pending_requests(request_keys: list[str], stop: asyncio.Event, 
             return
 
 
-def _validate_upstream() -> tuple[str, str]:
-    if not UPSTREAM_URL:
+def _upstream_name(agent: dict[str, Any] | None = None) -> str:
+    agent = agent or {}
+    configured = str(agent.get("upstream_name") or "").strip()
+    if configured:
+        return configured
+    url = str(agent.get("upstream_url") or "").strip()
+    if url:
+        return urlsplit(url).hostname or "agent-upstream"
+    return UPSTREAM_NAME or "configured-upstream"
+
+
+def _validate_upstream(agent: dict[str, Any] | None = None) -> tuple[str, str]:
+    url = str((agent or {}).get("upstream_url") or UPSTREAM_URL).strip()
+    if not url:
         raise ValueError("No MCP upstream is configured")
-    parsed = urlsplit(UPSTREAM_URL)
+    parsed = urlsplit(url)
     if (
         parsed.scheme not in {"http", "https"}
         or not parsed.netloc
@@ -630,7 +651,21 @@ def _validate_upstream() -> tuple[str, str]:
         or parsed.fragment
     ):
         raise ValueError("Configured MCP upstream URL is invalid")
-    return UPSTREAM_URL, UPSTREAM_NAME or "configured-upstream"
+    try:
+        parsed.port
+    except ValueError as exc:
+        raise ValueError("Configured MCP upstream URL is invalid") from exc
+    return url, _upstream_name(agent)
+
+
+def _upstream_session_scope(url: str, name: str) -> str:
+    """Return a credential-free identity for the upstream owning an MCP session."""
+    parsed = urlsplit(url)
+    host = (parsed.hostname or "").lower()
+    port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+    path = parsed.path.rstrip("/") or "/"
+    identity = f"{parsed.scheme.lower()}://{host}:{port}{path}\0{name.strip()}"
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
 async def _persist_and_emit(event: InterceptionEvent, emit_event: Callable[[dict[str, Any]], Awaitable[None]] | None) -> None:
@@ -652,7 +687,7 @@ async def _persist_and_emit(event: InterceptionEvent, emit_event: Callable[[dict
     event_payload["rule_risk_score"] = event.rule_risk_score
     event_payload["decision_source"] = event.decision_source
     try:
-        from database import MCPRequestEvent, SessionLocal
+        from database import MCPEventOutbox, MCPRequestEvent, SessionLocal
 
         db = SessionLocal()
         try:
@@ -691,6 +726,32 @@ async def _persist_and_emit(event: InterceptionEvent, emit_event: Callable[[dict
                 agent_record.total_requests = (agent_record.total_requests or 0) + 1
                 if event.decision == "block":
                     agent_record.blocked_requests = (agent_record.blocked_requests or 0) + 1
+            live_fields = (
+                "schema_version", "event_id", "timestamp", "session_id", "request_id",
+                "agent_id", "agent_name", "environment", "direction", "method",
+                "upstream_server", "tool_name", "arguments", "resource_uri", "prompt_name",
+                "decision", "decision_reason", "matched_rule_ids", "latency_ms",
+                "response_status", "response_size_bytes", "source_ip", "payload_hash", "payload",
+                "rule_risk_score", "decision_source", "sqli_findings", "ml_score",
+            )
+            live_event = {
+                "type": "mcp_event",
+                "data": {key: event_payload.get(key) for key in live_fields},
+            }
+            live_event["data"]["ml_anomaly"] = False
+            severity = "high" if event.decision == "block" else "medium" if event.decision == "flag" else "info"
+            db.add(MCPEventOutbox(
+                event_id=event.event_id,
+                event_type="mcp.security.alert" if event.decision in {"block", "flag"} else "mcp.interception",
+                schema_version=event.schema_version,
+                occurred_at=datetime.fromisoformat(event.timestamp.replace("Z", "+00:00")).replace(tzinfo=None),
+                agent_id=event.agent_id,
+                decision=event.decision,
+                severity=severity,
+                payload_json=json.dumps(live_event, ensure_ascii=False),
+                status="pending",
+                next_attempt_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=1),
+            ))
             db.commit()
         finally:
             db.close()
@@ -703,7 +764,7 @@ async def _persist_and_emit(event: InterceptionEvent, emit_event: Callable[[dict
             logger.error("Failed to emit MCP event event_id=%s", event.event_id)
 
 
-def _upstream_headers(request: Request, session_id: str | None) -> dict[str, str]:
+def _upstream_headers(request: Request, session_id: str | None, agent: dict[str, Any]) -> dict[str, str]:
     headers = {
         "accept": "application/json, text/event-stream",
         "content-type": "application/json",
@@ -717,8 +778,10 @@ def _upstream_headers(request: Request, session_id: str | None) -> dict[str, str
         headers["mcp-protocol-version"] = protocol_version
     if session_id:
         headers["mcp-session-id"] = session_id
-    if UPSTREAM_TOKEN:
-        headers["authorization"] = f"Bearer {UPSTREAM_TOKEN}"
+    token_env = str(agent.get("upstream_token_env") or "").strip()
+    upstream_token = os.getenv(token_env, "") if token_env else (UPSTREAM_TOKEN if not agent.get("upstream_url") else "")
+    if upstream_token:
+        headers["authorization"] = f"Bearer {upstream_token}"
     return headers
 
 
@@ -764,16 +827,18 @@ def _tools_list_result(
             separators=(",", ":"),
         )
         current_hash = hashlib.sha256(definition.encode("utf-8")).hexdigest()
-        identity_key = (UPSTREAM_NAME, tool_name)
+        upstream_name = _upstream_name(agent)
+        identity_key = (upstream_name, tool_name)
         previous = _tool_definition_hashes.get(identity_key)
         if previous is not None and previous != current_hash:
             changed = True
         _tool_definition_hashes[identity_key] = current_hash
     if not response_message["result"].get("nextCursor"):
-        previous_names = _tool_list_snapshots.get(UPSTREAM_NAME)
+        upstream_name = _upstream_name(agent)
+        previous_names = _tool_list_snapshots.get(upstream_name)
         if previous_names is not None and previous_names - current_names:
             changed = True
-        _tool_list_snapshots[UPSTREAM_NAME] = current_names
+        _tool_list_snapshots[upstream_name] = current_names
     filtered = valid_tools
     if allowed_tools:
         filtered = [tool for tool in valid_tools if tool["name"] in allowed_tools]
@@ -966,7 +1031,7 @@ async def _stream_sse(
         for event in events:
             event.response_status = "error"
             event.decision_reason = event.decision_reason or "Upstream stream failed"
-        logger.error("MCP upstream stream failed upstream=%s error_type=%s", UPSTREAM_NAME, type(exc).__name__)
+        logger.error("MCP upstream stream failed upstream=%s error_type=%s", events[0].upstream_server if events else "unknown", type(exc).__name__)
     finally:
         await upstream.aclose()
         await client.aclose()
@@ -1002,7 +1067,8 @@ async def _forward(
         return JSONResponse(blocked_replies[0] if len(blocked_replies) == 1 else blocked_replies)
 
     agent_id = int(agent["agent_id"])
-    upstream_url, _ = _validate_upstream()
+    upstream_url, upstream_name = _validate_upstream(agent)
+    upstream_scope = _upstream_session_scope(upstream_url, upstream_name)
     try:
         claimed_keys = await _claim_pending_requests(sent_messages, agent_id, session_id)
     except SharedStateUnavailable:
@@ -1028,7 +1094,7 @@ async def _forward(
     claim_task = asyncio.current_task()
     claim_stop, claim_renewer = _start_claim_renewer(claimed_keys, claim_task)
     started = time.perf_counter()
-    outgoing_headers = _upstream_headers(request, session_id)
+    outgoing_headers = _upstream_headers(request, session_id, agent)
     async with _agent_semaphore(int(agent["agent_id"])):
         async with _session_semaphore(int(agent["agent_id"]), session_id):
             if len(sent_messages) == 1 and not is_batch:
@@ -1066,6 +1132,7 @@ async def _forward(
                         try:
                             session_bound = len(returned_session) <= 255 and await get_shared_state().bind_mcp_session(
                                 returned_session, int(agent["agent_id"]), MCP_SESSION_TTL_SECONDS,
+                                upstream_scope=upstream_scope,
                             )
                         except SharedStateUnavailable:
                             logger.exception("Shared state unavailable while binding MCP session")
@@ -1125,7 +1192,7 @@ async def _forward(
                 except asyncio.CancelledError:
                     raise
                 except (httpx.HTTPError, PayloadLimitExceeded, InvalidJSONRPC, ValueError, TimeoutError):
-                    logger.error("MCP upstream request failed upstream=%s", UPSTREAM_NAME)
+                    logger.error("MCP upstream request failed upstream=%s", upstream_name)
                     event.response_status = "error"
                     event.latency_ms = (time.perf_counter() - started) * 1000
                     event.decision_reason = "MCP upstream unavailable or returned invalid data"
@@ -1209,7 +1276,7 @@ async def _forward(
                         return Response(status_code=202)
                     return JSONResponse(all_replies)
                 except (httpx.HTTPError, PayloadLimitExceeded, InvalidJSONRPC, ValueError, TimeoutError):
-                    logger.error("MCP upstream batch request failed upstream=%s", UPSTREAM_NAME)
+                    logger.error("MCP upstream batch request failed upstream=%s", upstream_name)
                     for _, event in allowed:
                         event.response_status = "error"
                         event.latency_ms = (time.perf_counter() - started) * 1000
@@ -1261,7 +1328,7 @@ async def intercept_request(
             environment=agent.get("environment"),
             direction="agent_to_server",
             method="invalid",
-            upstream_server=UPSTREAM_NAME,
+            upstream_server=_upstream_name(agent),
             tool_name=None,
             arguments=None,
             resource_uri=None,
@@ -1310,12 +1377,16 @@ async def intercept_request(
     agent_id = int(agent["agent_id"])
     if session_id:
         try:
+            session_upstream_url, session_upstream_name = _validate_upstream(agent)
+            upstream_scope = _upstream_session_scope(session_upstream_url, session_upstream_name)
             session_valid = (
                 len(session_id) <= 255
                 and await get_shared_state().validate_mcp_session(
-                    session_id, agent_id, MCP_SESSION_TTL_SECONDS,
+                    session_id, agent_id, MCP_SESSION_TTL_SECONDS, upstream_scope=upstream_scope,
                 )
             )
+        except ValueError:
+            return _error_http(503, "MCP upstream is not configured")
         except SharedStateUnavailable:
             logger.exception("Shared state unavailable while validating MCP session")
             return _error_http(503, "MCP session coordination unavailable")
@@ -1328,8 +1399,8 @@ async def intercept_request(
                 except InvalidJSONRPC:
                     event = invalid_event("Request used an unknown MCP session")
                 event.decision = "block"
-                event.decision_reason = "MCP session is not bound to this agent"
-                event.matched_rule_ids = ["GATEWAY-SESSION-OWNERSHIP"]
+                event.decision_reason = "MCP session is not bound to this agent and configured upstream"
+                event.matched_rule_ids = ["GATEWAY-SESSION-BOUNDARY"]
                 event.response_status = "error"
                 await _persist_and_emit(event, emit_event)
             return _error_http(404, "MCP session not found")
@@ -1388,7 +1459,7 @@ async def intercept_request(
 
     try:
         if allowed:
-            _validate_upstream()
+            _validate_upstream(agent)
     except ValueError:
         for _, event in allowed:
             event.response_status = "error"

@@ -229,6 +229,30 @@ class MCPRequestEvent(Base):
     decision_source = Column(String(32), nullable=False, default="rule")
 
 
+class MCPEventOutbox(Base):
+    """Durable handoff from committed MCP audit events to async consumers."""
+    __tablename__ = "mcp_event_outbox"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(String(40), unique=True, nullable=False, index=True)
+    event_type = Column(String(80), nullable=False, index=True)
+    schema_version = Column(String(16), nullable=False, default="1.0")
+    occurred_at = Column(DateTime, nullable=False, index=True)
+    agent_id = Column(Integer, nullable=False, index=True)
+    decision = Column(String(16), nullable=False, index=True)
+    severity = Column(String(16), nullable=False, default="info", index=True)
+    payload_json = Column(Text, nullable=False)
+    status = Column(String(16), nullable=False, default="pending", index=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    next_attempt_at = Column(DateTime, nullable=False, default=utcnow, index=True)
+    locked_by = Column(String(100), nullable=True)
+    locked_until = Column(DateTime, nullable=True, index=True)
+    published_at = Column(DateTime, nullable=True)
+    dead_lettered_at = Column(DateTime, nullable=True)
+    last_error = Column(String(200), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
+
+
 class SQLiPolicyConfig(Base):
     """Persistent indicator and per-tool SQL mode overrides."""
     __tablename__ = "sqli_policy_config"

@@ -46,6 +46,16 @@ from shared_state import (
     configure_shared_state,
     get_shared_state,
 )
+from event_pipeline import (
+    EVENT_CONSUMER_GROUP,
+    open_broker_message,
+    protect_broker_message,
+    run_event_consumer,
+    run_outbox_publisher,
+    update_outbox_payload,
+    validate_event_security_configuration,
+)
+from event_transports import close_event_transports, validate_transport_configuration
 
 # Import auth routes
 from auth_routes import router as auth_router
@@ -80,6 +90,14 @@ async def _relay_shared_messages() -> None:
                 if message.get("kind") == "event":
                     event = message.get("event")
                     if isinstance(event, dict):
+                        try:
+                            event = open_broker_message(event)
+                        except RuntimeError:
+                            logger.exception("Rejected unauthenticated or undecryptable broker event")
+                            continue
+                        # Durable outbox messages carry the dashboard event under payload.
+                        if isinstance(event.get("payload"), dict) and event.get("event_id"):
+                            event = event["payload"]
                         await traffic_broadcaster.broadcast_local(event)
                 elif message.get("kind") == "cancel":
                     request_key = message.get("request_key")
@@ -94,20 +112,63 @@ async def _relay_shared_messages() -> None:
             await asyncio.sleep(1)
 
 
+async def _deliver_mcp_stream_event(message: dict) -> None:
+    """Deliver a durable stream event to local sockets and the other workers."""
+    if message.get("type") == "security_correlation" and isinstance(message.get("data"), dict):
+        data = message["data"]
+        alert = create_or_update_alert(
+            agent_id=str(data.get("agent_id", "unknown")),
+            alert_type="rule_based",
+            reason=str(data.get("decision_reason", "Cross-event security correlation")),
+            severity=str(data.get("severity", "HIGH")).upper(),
+            request_data={
+                "method": data.get("method"),
+                "trigger_event_id": data.get("trigger_event_id"),
+                "matched_rule_ids": data.get("matched_rule_ids", []),
+                "correlation_window_seconds": data.get("correlation_window_seconds"),
+            },
+            event_id=str(data.get("event_id", "")),
+            decision="FLAG",
+        )
+        correlation_rule = next(
+            (value for value in data.get("matched_rule_ids", []) if isinstance(value, str)),
+            "CEP-UNKNOWN",
+        )
+        alert["rule_id"] = correlation_rule
+        alert["risk"]["rule_score"] = max(alert["risk"].get("rule_score", 0), 95)
+        alert["risk"]["score"] = max(alert["risk"].get("score", 0), 95)
+        alert["evidence"]["rule"] = correlation_rule
+        alert["evidence"]["explanation"] = str(data.get("decision_reason", "Cross-event security correlation"))
+        await traffic_broadcaster.broadcast(message)
+    elif message.get("type") == "mcp_event" and isinstance(message.get("data"), dict):
+        await traffic_broadcaster.broadcast(message)
+
+
 @asynccontextmanager
 async def gateway_lifespan(_app):
-    await configure_shared_state()
+    validate_event_security_configuration()
+    validate_transport_configuration()
+    state = await configure_shared_state()
+    await state.ensure_event_consumer_group(EVENT_CONSUMER_GROUP)
     restore_behavioral_models()
     restore_persisted_alerts()
     subscriber = asyncio.create_task(_relay_shared_messages(), name="shared-state-subscriber")
+    publisher = asyncio.create_task(run_outbox_publisher(), name="mcp-event-outbox-publisher")
+    consumer = asyncio.create_task(
+        run_event_consumer(_deliver_mcp_stream_event),
+        name="mcp-event-dashboard-consumer",
+    )
     try:
         yield
     finally:
-        subscriber.cancel()
-        try:
-            await subscriber
-        except asyncio.CancelledError:
-            pass
+        for task in (subscriber, publisher, consumer):
+            task.cancel()
+        for task in (subscriber, publisher, consumer):
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        await close_event_transports()
         await close_shared_state()
 
 
@@ -132,7 +193,8 @@ Use this API to register MCP agents, enforce policy checks on tool calls, and
 inspect security, system, and behavioral-monitoring telemetry.
 
 The authenticated `POST /mcp/proxy` endpoint validates and forwards MCP
-Streamable HTTP JSON-RPC traffic to `SENTINEL_MCP_UPSTREAM_URL`. Tool calls are
+Streamable HTTP JSON-RPC traffic to the authenticated agent's configured
+upstream, or `SENTINEL_MCP_UPSTREAM_URL` when that agent has no override. Tool calls are
 checked against each agent's `allowed_tools`; redacted interception events are
 available through the operator-protected `GET /mcp/events` endpoint.
 
@@ -165,6 +227,10 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
 RATE_LIMIT_REQUESTS = max(1, int(os.getenv("SENTINEL_RATE_LIMIT_REQUESTS", "60")))
 RATE_LIMIT_WINDOW_SECONDS = max(1, int(os.getenv("SENTINEL_RATE_LIMIT_WINDOW_SECONDS", "60")))
+WS_MAX_CONNECTIONS = max(1, int(os.getenv("SENTINEL_WS_MAX_CONNECTIONS", "200")))
+WS_CONTROL_RATE = max(1, int(os.getenv("SENTINEL_WS_CONTROL_RATE", "60")))
+WS_MAX_CONTROL_BYTES = max(256, min(16_384, int(os.getenv("SENTINEL_WS_MAX_CONTROL_BYTES", "4096"))))
+WS_TICKET_RATE = max(1, int(os.getenv("SENTINEL_WS_TICKET_RATE", "20")))
 AUTH_FAILURE_LIMIT = max(1, int(os.getenv("SENTINEL_AUTH_FAILURE_LIMIT", "10")))
 AUTH_FAILURE_WINDOW_SECONDS = max(1, int(os.getenv("SENTINEL_AUTH_FAILURE_WINDOW_SECONDS", "60")))
 AGENT_RATE_LIMIT_REQUESTS = max(1, int(os.getenv("SENTINEL_AGENT_RATE_LIMIT_REQUESTS", str(RATE_LIMIT_REQUESTS))))
@@ -281,7 +347,10 @@ app.openapi = custom_openapi
 # Enable CORS only for configured dashboard origins; bearer auth does not use cookies.
 cors_origins = [
     origin.strip()
-    for origin in os.getenv("SENTINEL_CORS_ORIGINS", "http://localhost:3000").split(",")
+    for origin in os.getenv(
+        "SENTINEL_CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001",
+    ).split(",")
     if origin.strip()
 ]
 app.add_middleware(
@@ -452,12 +521,46 @@ def restore_persisted_alerts() -> None:
         db.close()
 
 
+def _argument_shape(arguments: Any) -> dict[str, int]:
+    """Return bounded, content-free size/shape signals for adaptive monitoring."""
+    try:
+        serialized_size = len(json.dumps(arguments, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    except (TypeError, ValueError, RecursionError):
+        serialized_size = 0
+    max_depth = 0
+    key_count = 0
+    string_bytes = 0
+    pending = [(arguments, 1)]
+    while pending:
+        value, depth = pending.pop()
+        max_depth = max(max_depth, depth)
+        if isinstance(value, dict):
+            key_count += len(value)
+            for key, child in value.items():
+                if isinstance(key, str):
+                    string_bytes += len(key.encode("utf-8", errors="replace"))
+                pending.append((child, depth + 1))
+        elif isinstance(value, (list, tuple)):
+            pending.extend((child, depth + 1) for child in value)
+        elif isinstance(value, str):
+            string_bytes += len(value.encode("utf-8", errors="replace"))
+    return {
+        "argument_bytes": min(serialized_size, 10_000_000),
+        "argument_depth": min(max_depth, 10_000),
+        "argument_keys": min(key_count, 1_000_000),
+        "argument_string_bytes": min(string_bytes, 10_000_000),
+    }
+
+
 def restore_behavioral_models() -> None:
     """Rebuild per-agent Isolation Forests from the retained request history."""
     from database import MCPRequestEvent, SessionLocal
 
     behavioral_monitor.history.clear()
     behavioral_monitor.feature_history.clear()
+    behavioral_monitor.allowed_tool_counts.clear()
+    behavioral_monitor.total_allowed_samples.clear()
+    behavioral_monitor.model_sample_counts.clear()
     behavioral_monitor.models.clear()
     behavioral_monitor.scalers.clear()
     behavioral_monitor.alerts.clear()
@@ -495,6 +598,9 @@ def restore_behavioral_models() -> None:
                         "timestamp": event.timestamp.isoformat(),
                         "method": event.method,
                         "params": params,
+                        "tool_name": event.tool_name,
+                        "decision": event.decision,
+                        **_argument_shape(arguments),
                     },
                 )
         logger.info("Restored %s behavioral models from persisted MCP events", len(behavioral_monitor.models))
@@ -528,32 +634,92 @@ class TrafficBroadcaster:
 
     def __init__(self):
         self.active_connections: Set[WebSocket] = set()
+        self.subscriptions: dict[WebSocket, dict[str, Any]] = {}
         self.lock = asyncio.Lock()
 
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
+    async def connect(self, websocket: WebSocket) -> bool:
         async with self.lock:
+            if len(self.active_connections) >= WS_MAX_CONNECTIONS:
+                return False
+            await websocket.accept(subprotocol="cybereye.v1")
             self.active_connections.add(websocket)
+            self.subscriptions[websocket] = {"event_types": {"mcp_event", "security_correlation"}}
         logger.info("WebSocket connected (worker-local total: %s)", len(self.active_connections))
+        return True
+
+    @staticmethod
+    def validate_subscription(filters: Any) -> dict[str, Any]:
+        if not isinstance(filters, dict) or set(filters) - {"agent_ids", "event_types", "decisions"}:
+            raise ValueError("Subscription supports only agent_ids, event_types, and decisions")
+        normalized: dict[str, Any] = {}
+        for key, maximum in (("agent_ids", 50), ("event_types", 16), ("decisions", 3)):
+            values = filters.get(key)
+            if values is None:
+                continue
+            if not isinstance(values, list) or len(values) > maximum:
+                raise ValueError(f"{key} must be a list with at most {maximum} values")
+            if key == "agent_ids":
+                if any(not isinstance(value, int) or isinstance(value, bool) or value <= 0 for value in values):
+                    raise ValueError("agent_ids must contain positive integers")
+                normalized[key] = set(values)
+            else:
+                if any(not isinstance(value, str) or not value or len(value) > 80 for value in values):
+                    raise ValueError(f"{key} must contain non-empty strings of at most 80 characters")
+                if key == "decisions" and any(value not in {"allow", "block", "flag"} for value in values):
+                    raise ValueError("decisions may contain only allow, block, and flag")
+                normalized[key] = set(values)
+        return normalized
+
+    async def subscribe(self, websocket: WebSocket, filters: Any) -> dict[str, Any]:
+        normalized = self.validate_subscription(filters)
+        async with self.lock:
+            if websocket not in self.active_connections:
+                raise ValueError("WebSocket is no longer connected")
+            self.subscriptions[websocket] = normalized
+        return {key: sorted(value) for key, value in normalized.items()}
 
     async def disconnect(self, websocket: WebSocket):
         async with self.lock:
             self.active_connections.discard(websocket)
+            self.subscriptions.pop(websocket, None)
         logger.info("WebSocket disconnected (worker-local total: %s)", len(self.active_connections))
 
     async def broadcast_local(self, message: dict):
         async with self.lock:
             connections = list(self.active_connections)
-        dead_connections = set()
-        for connection in connections:
+        data = message.get("data") if isinstance(message.get("data"), dict) else {}
+
+        async def deliver(connection: WebSocket) -> bool:
+            async with self.lock:
+                filters = self.subscriptions.get(connection, {})
+            agent_ids = filters.get("agent_ids")
+            if agent_ids is not None:
+                try:
+                    if int(data.get("agent_id")) not in agent_ids:
+                        return False
+                except (TypeError, ValueError):
+                    return False
+            event_types = filters.get("event_types")
+            if event_types is not None and message.get("type") not in event_types:
+                return False
+            decisions = filters.get("decisions")
+            if decisions is not None and data.get("decision") not in decisions:
+                return False
             try:
-                await connection.send_json(message)
+                await asyncio.wait_for(connection.send_json(message), timeout=0.5)
             except Exception:
                 logger.exception("WebSocket send failed")
-                dead_connections.add(connection)
+                return True
+            return False
+
+        dead_connections = {connection for connection, failed in zip(
+            connections, await asyncio.gather(*(deliver(connection) for connection in connections)),
+        ) if failed}
         if dead_connections:
             async with self.lock:
                 self.active_connections.difference_update(dead_connections)
+                for connection in dead_connections:
+                    self.subscriptions.pop(connection, None)
 
     async def broadcast(self, message: dict):
         """Send locally immediately, then publish to the other workers."""
@@ -565,8 +731,10 @@ class TrafficBroadcaster:
             await state.publish_message({
                 "kind": "event",
                 "worker_id": state.worker_id,
-                "event": message,
+                "event": protect_broker_message(message),
             })
+        except RuntimeError:
+            logger.exception("Cross-worker event protection is misconfigured")
         except SharedStateUnavailable:
             logger.exception("Cross-worker live-event publish failed")
 
@@ -581,6 +749,18 @@ async def create_websocket_ticket(request: Request):
     operator = getattr(request.state, "operator_identity", None)
     if not operator:
         raise HTTPException(status_code=401, detail="Operator access token required")
+    source_ip = request.client.host if request.client else "unknown"
+    try:
+        allowed = await get_shared_state().consume_rate_limit(
+            [("ws-ticket-user", str(operator["sub"])), ("ws-ticket-ip", source_ip)],
+            WS_TICKET_RATE,
+            60,
+        )
+    except SharedStateUnavailable:
+        logger.exception("Shared state unavailable while rate-limiting WebSocket tickets")
+        raise HTTPException(status_code=503, detail="WebSocket authentication unavailable")
+    if not allowed:
+        raise HTTPException(status_code=429, detail="WebSocket ticket rate limit exceeded")
     ticket = secrets.token_urlsafe(32)
     try:
         await get_shared_state().put_ws_ticket(ticket, int(operator["sub"]), ttl_seconds=30)
@@ -750,6 +930,12 @@ async def verify_agent_api_key(api_key: str, source_ip: str):
                     allowed_tools = parsed_tools if isinstance(parsed_tools, list) else []
                 except (TypeError, ValueError):
                     allowed_tools = []
+                try:
+                    agent_metadata = json.loads(agent.agent_metadata or "{}")
+                except (TypeError, ValueError):
+                    agent_metadata = {}
+                if not isinstance(agent_metadata, dict):
+                    agent_metadata = {}
                 identity = {
                     "id": agent.id,
                     "agent_id": agent.id,
@@ -759,6 +945,9 @@ async def verify_agent_api_key(api_key: str, source_ip: str):
                     "status": agent.status or "active",
                     "allowed_tools": allowed_tools,
                     "risk_level": agent.risk_level or "low",
+                    "upstream_url": agent_metadata.get("upstream_url"),
+                    "upstream_name": agent_metadata.get("upstream_name"),
+                    "upstream_token_env": agent_metadata.get("upstream_token_env"),
                 }
                 now = time.monotonic()
                 should_update_seen = now - last_seen_write_at.get(agent.id, 0.0) >= 60
@@ -960,6 +1149,9 @@ async def mcp_proxy(request: Request):
                 "timestamp": event["timestamp"],
                 "method": event["method"],
                 "params": behavioral_params,
+                "tool_name": event.get("tool_name"),
+                "decision": event.get("decision", "allow"),
+                **_argument_shape(event_arguments),
             },
         )
         safe_event["data"]["ml_anomaly"] = behavioral_anomaly
@@ -1027,7 +1219,9 @@ async def mcp_proxy(request: Request):
             alert["evidence"]["rule"] = alert["rule_id"]
             alert["evidence"]["sqli_findings"] = sqli_findings
             alert["evidence"]["explanation"] = reason
-        await traffic_broadcaster.broadcast(safe_event)
+        queued = await asyncio.to_thread(update_outbox_payload, event["event_id"], safe_event)
+        if not queued:
+            await traffic_broadcaster.broadcast(safe_event)
 
     return await mcp_interception.intercept_request(request, agent_info, emit_interception_event)
 
@@ -1127,13 +1321,13 @@ async def websocket_traffic(websocket: WebSocket):
         await websocket.close(code=4401, reason="Operator authentication required")
         return
 
-    await websocket.accept(subprotocol="cybereye.v1")
-    async with traffic_broadcaster.lock:
-        traffic_broadcaster.active_connections.add(websocket)
+    if not await traffic_broadcaster.connect(websocket):
+        await websocket.close(code=4429, reason="Live traffic connection limit reached")
+        return
     logger.info("Authenticated operator connected to live traffic feed")
 
     try:
-        # Send initial snapshot on connect
+        # Send aggregate-only bootstrap data; per-event logs wait for the private filter.
         await websocket.send_json({
             "type": "snapshot",
             "data": {
@@ -1141,17 +1335,38 @@ async def websocket_traffic(websocket: WebSocket):
                 "total_blocked": len(blocked_requests),
                 "total_anomalies": len(anomaly_alerts),
                 "total_system_events": len(system_events),
-                "recent_logs": request_log[-10:],
             },
             "timestamp": datetime.now().isoformat(),
         })
-
-        # Keep connection alive
+        # Filters remain local to this gateway and are never published to Redis.
+        control_times: deque[float] = deque()
         while True:
             try:
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                now = time.monotonic()
+                control_times.append(now)
+                while control_times and now - control_times[0] >= 60:
+                    control_times.popleft()
+                if len(control_times) > WS_CONTROL_RATE or len(data.encode("utf-8")) > WS_MAX_CONTROL_BYTES:
+                    await websocket.close(code=4429, reason="Live traffic control rate or size limit exceeded")
+                    break
                 if data == "ping":
                     await websocket.send_json({"type": "pong"})
+                    continue
+                try:
+                    control = json.loads(data)
+                except json.JSONDecodeError:
+                    await websocket.close(code=4400, reason="Invalid live traffic control message")
+                    break
+                if not isinstance(control, dict) or control.get("type") != "subscribe":
+                    await websocket.close(code=4400, reason="Unsupported live traffic control message")
+                    break
+                try:
+                    filters = await traffic_broadcaster.subscribe(websocket, control.get("filters", {}))
+                except ValueError as exc:
+                    await websocket.send_json({"type": "subscription_error", "message": str(exc)})
+                    continue
+                await websocket.send_json({"type": "subscription_updated", "filters": filters})
             except asyncio.TimeoutError:
                 try:
                     await websocket.send_json({"type": "heartbeat"})
@@ -1159,9 +1374,10 @@ async def websocket_traffic(websocket: WebSocket):
                     break
 
     except WebSocketDisconnect:
-        await traffic_broadcaster.disconnect(websocket)
+        pass
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
+    finally:
         await traffic_broadcaster.disconnect(websocket)
 
 

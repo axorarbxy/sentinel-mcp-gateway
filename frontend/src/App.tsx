@@ -1,15 +1,17 @@
 // App.tsx
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { ThemeProvider, createTheme, CssBaseline, AppBar, Toolbar, Typography, Tabs, Tab, Box, Button } from '@mui/material';
+import { ThemeProvider, createTheme, CssBaseline, AppBar, Toolbar, Typography, Box, Button, Drawer, List, ListItemButton, ListItemIcon, ListItemText, Divider, IconButton, useMediaQuery } from '@mui/material';
 import {
   Dashboard as DashboardIcon,
   Warning as WarningIcon,
   Person as PersonIcon,
   Security as SecurityIcon,
-  Storage as StorageIcon,
   Rule as PolicyIcon,
   Logout as LogoutIcon,
+  Menu as MenuIcon,
+  Hub as HubIcon,
+  Insights as InsightsIcon,
 } from '@mui/icons-material';
 import { logout } from './services/api';
 import Dashboard from './components/Dashboard';
@@ -38,34 +40,37 @@ import SQLiPolicies from './pages/SQLiPolicies';
 const darkTheme = createTheme({
   palette: {
     mode: 'dark',
-    primary: { main: '#6D001A', light: '#D56B82', dark: '#4A0012', contrastText: '#FFFFFF' },
-    secondary: { main: '#FFFFFF', contrastText: '#6D001A' },
-    background: { default: '#080808', paper: '#171214' },
-    text: { primary: '#FFFFFF', secondary: 'rgba(255, 255, 255, 0.72)' },
+    primary: { main: '#56E0C3', light: '#A1F3DF', dark: '#1D9F8C', contrastText: '#07130F' },
+    secondary: { main: '#A99BFF', contrastText: '#0C1020' },
+    background: { default: '#080D14', paper: '#101822' },
+    text: { primary: '#F3F7FA', secondary: '#9BAAB7' },
   },
   components: {
     MuiLink: {
       styleOverrides: {
-        root: { color: '#D56B82' },
+        root: { color: '#56E0C3' },
       },
     },
     MuiTab: {
       styleOverrides: {
         root: {
-          '&.Mui-selected': { color: '#D56B82' },
+          '&.Mui-selected': { color: '#56E0C3' },
         },
       },
     },
     MuiButton: {
       styleOverrides: {
-        outlined: { color: '#D56B82', borderColor: 'rgba(213, 107, 130, 0.55)' },
+        root: { borderRadius: 10, textTransform: 'none', fontWeight: 700 },
+        outlined: { color: '#56E0C3', borderColor: 'rgba(86, 224, 195, 0.4)' },
       },
     },
     MuiSvgIcon: {
       styleOverrides: {
-        colorPrimary: { color: '#D56B82' },
+        colorPrimary: { color: '#56E0C3' },
       },
     },
+    MuiPaper: { styleOverrides: { root: { backgroundImage: 'none', border: '1px solid rgba(154, 175, 193, 0.11)', borderRadius: 16 } } },
+    MuiCard: { styleOverrides: { root: { backgroundImage: 'linear-gradient(145deg, rgba(18, 29, 41, .98), rgba(13, 21, 31, .98))', border: '1px solid rgba(154, 175, 193, 0.12)', borderRadius: 16 } } },
   },
 });
 
@@ -82,19 +87,9 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [tabValue, setTabValue] = useState(0);
   const [systemStatus, setSystemStatus] = useState<'active' | 'degraded' | 'critical'>('active');
-
-  // Sync tab value with current route
-  useEffect(() => {
-    const path = location.pathname;
-    if (path.includes('/mcp')) setTabValue(4);
-    else if (path.includes('/policies')) setTabValue(5);
-    else if (path.includes('/alerts')) setTabValue(1);
-    else if (path.includes('/agents')) setTabValue(2);
-    else if (path.includes('/modules')) setTabValue(3);
-    else setTabValue(0);
-  }, [location.pathname]);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const desktop = useMediaQuery('(min-width: 900px)');
 
   // Poll system health
   useEffect(() => {
@@ -116,31 +111,18 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     return () => clearInterval(interval);
   }, []);
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
-    setTabValue(newValue);
-    switch (newValue) {
-      case 0:
-        navigate('/dashboard', { replace: true });
-        break;
-      case 1:
-        navigate('/alerts', { replace: true });
-        break;
-      case 2:
-        navigate('/agents', { replace: true });
-        break;
-      case 3:
-        navigate('/modules', { replace: true });
-        break;
-      case 4:
-        navigate('/mcp', { replace: true });
-        break;
-      case 5:
-        navigate('/policies/sqli', { replace: true });
-        break;
-      default:
-        navigate('/dashboard', { replace: true });
-    }
-  };
+  const navGroups = [
+    { label: 'OVERVIEW', items: [
+      { label: 'Command center', path: '/dashboard', icon: <DashboardIcon /> },
+      { label: 'Threat alerts', path: '/alerts', icon: <WarningIcon /> },
+      { label: 'AI agents', path: '/agents', icon: <PersonIcon /> },
+    ] },
+    { label: 'PROTECTION', items: [
+      { label: 'Security modules', path: '/modules', icon: <SecurityIcon /> },
+      { label: 'MCP gateway', path: '/mcp', icon: <HubIcon /> },
+      { label: 'Policies', path: '/policies/sqli', icon: <PolicyIcon /> },
+    ] },
+  ];
 
   const getStatusConfig = () => {
     switch (systemStatus) {
@@ -175,106 +157,51 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     navigate('/login', { replace: true });
   };
 
+  const pageTitle = navGroups.flatMap((group) => group.items).find((item) =>
+    item.path === location.pathname || (item.path !== '/dashboard' && location.pathname.startsWith(item.path)),
+  )?.label || 'Security workspace';
+
+  const drawer = (
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', px: 2, py: 2.5 }}>
+      <Box onClick={() => navigate('/dashboard')} sx={{ display: 'flex', alignItems: 'center', gap: 1.4, px: 1.2, mb: 4, cursor: 'pointer' }}>
+        <Box sx={{ width: 40, height: 40, display: 'grid', placeItems: 'center', borderRadius: 2.5, color: '#07130F', background: 'linear-gradient(135deg, #76F0D0, #39BDA6)', boxShadow: '0 8px 24px rgba(57,189,166,.2)' }}><SecurityIcon /></Box>
+        <Box><Typography sx={{ fontWeight: 900, letterSpacing: 1.1, lineHeight: 1.1 }}>CYBEREYE</Typography><Typography sx={{ color: '#718494', fontSize: 10, letterSpacing: 2.2, mt: .5 }}>SENTINEL PLATFORM</Typography></Box>
+      </Box>
+      {navGroups.map((group) => <Box key={group.label} sx={{ mb: 2.8 }}>
+        <Typography sx={{ color: '#607383', fontSize: 10, fontWeight: 800, letterSpacing: 1.8, px: 1.5, mb: .8 }}>{group.label}</Typography>
+        <List disablePadding>
+          {group.items.map((item) => {
+            const selected = item.path === location.pathname || (item.path !== '/dashboard' && location.pathname.startsWith(item.path));
+            return <ListItemButton key={item.path} selected={selected} onClick={() => { navigate(item.path); setMobileOpen(false); }} sx={{ mb: .35, px: 1.5, py: 1.15, borderRadius: 2.5, color: selected ? '#EAFBF7' : '#93A3B1', '& .MuiListItemIcon-root': { minWidth: 38, color: selected ? '#56E0C3' : '#64798A' }, '&.Mui-selected': { background: 'linear-gradient(90deg, rgba(86,224,195,.16), rgba(86,224,195,.035))', boxShadow: 'inset 2px 0 #56E0C3' }, '&.Mui-selected:hover': { background: 'rgba(86,224,195,.18)' }, '&:hover': { color: '#F3F7FA', backgroundColor: 'rgba(255,255,255,.035)' } }}>
+              <ListItemIcon>{item.icon}</ListItemIcon><ListItemText primary={item.label} slotProps={{ primary: { sx: { fontSize: 13, fontWeight: selected ? 750 : 550 } } }} />{selected && <Box sx={{ width: 5, height: 5, bgcolor: '#56E0C3', borderRadius: '50%', boxShadow: '0 0 12px #56E0C3' }} />}
+            </ListItemButton>;
+          })}
+        </List>
+      </Box>)}
+      <Box sx={{ mt: 'auto', p: 1.5, border: '1px solid rgba(154,175,193,.12)', borderRadius: 3, background: 'linear-gradient(145deg, rgba(19,31,42,.9), rgba(12,20,29,.85))' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: .8 }}><InsightsIcon sx={{ fontSize: 17, color: '#56E0C3' }} /><Typography sx={{ fontSize: 11, fontWeight: 800 }}>Gateway telemetry</Typography></Box>
+        <Typography sx={{ color: '#8293A0', fontSize: 11, lineHeight: 1.6 }}>Live inspection for agent traffic and security signals.</Typography>
+        <Divider sx={{ my: 1.2, borderColor: 'rgba(154,175,193,.12)' }} />
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><Typography sx={{ color: '#758795', fontSize: 10, fontFamily: 'monospace' }}>API · :8001</Typography><Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: statusConfig.color, boxShadow: `0 0 10px ${statusConfig.color}` }} /></Box>
+      </Box>
+    </Box>
+  );
+
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      <AppBar
-        position="static"
-        elevation={0}
-        sx={{
-          bgcolor: 'background.paper',
-          borderBottom: '1px solid rgba(255,255,255,0.05)',
-        }}
-      >
-        <Toolbar>
-          <Typography
-            variant="h6"
-            sx={{
-              flexGrow: 0,
-              mr: 4,
-              cursor: 'pointer',
-              fontWeight: 700,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1,
-              color: 'primary.light',
-              '&:hover': { color: 'secondary.main' },
-            }}
-            onClick={() => navigate('/dashboard', { replace: true })}
-          >
-            <SecurityIcon sx={{ color: 'primary.light' }} />
-            Sentinel-MCP
-          </Typography>
-
-          <Tabs value={tabValue} onChange={handleTabChange} textColor="primary" indicatorColor="primary">
-            <Tab icon={<DashboardIcon />} label="Dashboard" />
-            <Tab icon={<WarningIcon />} label="Alerts" />
-            <Tab icon={<PersonIcon />} label="Agents" />
-            <Tab icon={<SecurityIcon />} label="Modules" />
-            <Tab icon={<StorageIcon />} label="MCP" />
-            <Tab icon={<PolicyIcon />} label="Policies" />
-          </Tabs>
-
-          {/* System Status Indicator */}
-          <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Box
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                px: 2,
-                py: 0.5,
-                borderRadius: 4,
-                bgcolor: statusConfig.bg,
-                border: `1px solid ${statusConfig.border}`,
-              }}
-            >
-              <Box
-                sx={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  bgcolor: statusConfig.color,
-                  boxShadow: `0 0 8px ${statusConfig.color}`,
-                  animation: 'pulse-dot 2s ease-in-out infinite',
-                  '@keyframes pulse-dot': {
-                    '0%, 100%': { opacity: 1 },
-                    '50%': { opacity: 0.4 },
-                  },
-                }}
-              />
-              <Typography
-                variant="caption"
-                sx={{
-                  fontWeight: 600,
-                  color: statusConfig.color,
-                  letterSpacing: 0.5,
-                }}
-              >
-                {statusConfig.label}
-              </Typography>
+    <Box sx={{ minHeight: '100vh', display: 'flex', color: 'text.primary', background: 'radial-gradient(ellipse at 76% -12%, rgba(29,159,140,.10), transparent 32%), #080D14' }}>
+      <Drawer variant={desktop ? 'permanent' : 'temporary'} open={desktop || mobileOpen} onClose={() => setMobileOpen(false)} ModalProps={{ keepMounted: true }} sx={{ width: { md: 264 }, flexShrink: 0, '& .MuiDrawer-paper': { width: 264, boxSizing: 'border-box', bgcolor: '#0A1119', border: 0, borderRight: '1px solid rgba(154,175,193,.1)' } }}>{drawer}</Drawer>
+      <Box sx={{ minWidth: 0, flex: 1 }}>
+        <AppBar position="sticky" elevation={0} sx={{ bgcolor: 'rgba(8,13,20,.86)', backdropFilter: 'blur(18px)', borderBottom: '1px solid rgba(154,175,193,.1)' }}>
+          <Toolbar sx={{ minHeight: '72px !important', px: { xs: 2, md: 4 } }}>
+            {!desktop && <IconButton onClick={() => setMobileOpen(true)} sx={{ mr: 1.5, color: 'text.primary' }} aria-label="Open navigation"><MenuIcon /></IconButton>}
+            <Box><Typography sx={{ color: '#708393', fontSize: 10, letterSpacing: 1.7, fontWeight: 800 }}>SECURITY OPERATIONS / {pageTitle.toUpperCase()}</Typography><Typography sx={{ fontSize: 15, fontWeight: 750, mt: .3 }}>{pageTitle}</Typography></Box>
+            <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 } }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: .9, px: 1.4, py: .8, bgcolor: statusConfig.bg, border: `1px solid ${statusConfig.border}`, borderRadius: 20 }}><Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: statusConfig.color, boxShadow: `0 0 9px ${statusConfig.color}` }} /><Typography sx={{ fontSize: 10, fontWeight: 850, letterSpacing: .8, color: statusConfig.color, display: { xs: 'none', sm: 'block' } }}>{statusConfig.label}</Typography></Box>
+              <Button variant="outlined" size="small" startIcon={<LogoutIcon />} onClick={handleLogout} sx={{ color: '#AAB8C2', borderColor: 'rgba(154,175,193,.18)', '&:hover': { borderColor: 'primary.main', color: 'primary.light' } }}>Sign out</Button>
             </Box>
-            <Typography variant="caption" color="textSecondary" sx={{ fontWeight: 600 }}>
-              v2.0
-            </Typography>
-            <Button
-              variant="outlined"
-              size="small"
-              startIcon={<LogoutIcon />}
-              onClick={handleLogout}
-              sx={{
-                color: 'text.primary',
-                borderColor: 'rgba(255,255,255,0.2)',
-                '&:hover': { borderColor: 'primary.light', backgroundColor: 'rgba(255,255,255,0.04)' },
-              }}
-            >
-              Sign out
-            </Button>
-          </Box>
-        </Toolbar>
-      </AppBar>
-
-      <Box sx={{ flexGrow: 1, bgcolor: 'background.default' }}>
-        {children}
+          </Toolbar>
+        </AppBar>
+        <Box className="workspace-content" sx={{ width: '100%', maxWidth: 1680, mx: 'auto', p: { xs: 2, sm: 2.5, lg: 3.5 } }}>{children}</Box>
       </Box>
     </Box>
   );

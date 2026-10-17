@@ -132,8 +132,11 @@ const SQLiPolicies: React.FC = () => {
 
       <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', mb: 1 }}>
         <Typography variant="h6">Indicators</Typography>
-        <Typography variant="caption" color="text.secondary">{indicators.filter(item => item.enabled).length} enabled</Typography>
+        <Typography variant="caption" color="text.secondary">{indicators.filter(item => item.enabled).length} of {indicators.length} enabled</Typography>
       </Box>
+      {indicators.length > 15 && <Alert severity="info" sx={{ mb: 2 }}>
+        The catalog includes 100 vendor-specific SQL policies, disabled by default. Enable the rules that match your database and tool behavior.
+      </Alert>}
       {loading ? <LinearProgress /> : indicators.map(indicator => (
         <Paper key={indicator.id} variant="outlined" sx={{ p: 2, mb: 1.25 }}>
           <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: { sm: 'center' }, gap: 2 }}>

@@ -53,6 +53,8 @@ def list_sqli_indicators() -> list[dict[str, Any]]:
             "severity": item["severity"],
             "category": item["category"],
             "recommendation": item["recommendation"],
+            "enabled": item.get("enabled", True),
+            "query_tool": item.get("query_tool", item["id"] in QUERY_TOOL_INDICATORS),
         }
         for item in _INDICATORS
     ]
@@ -289,9 +291,9 @@ def analyze_sql_injection(
         for indicator in _INDICATORS:
             if indicator["id"] == "SQLI-015":
                 continue
-            if enabled_overrides and enabled_overrides.get(indicator["id"]) is False:
+            if not (enabled_overrides or {}).get(indicator["id"], indicator.get("enabled", True)):
                 continue
-            if mode == "query_tool" and indicator["id"] not in QUERY_TOOL_INDICATORS:
+            if mode == "query_tool" and indicator["id"] not in QUERY_TOOL_INDICATORS and not indicator.get("query_tool", False):
                 continue
             matched = _match_indicator(indicator, forms, mode)
             if matched is None:

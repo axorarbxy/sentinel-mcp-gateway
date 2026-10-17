@@ -89,6 +89,15 @@ export const gatewayApi = {
     return response.data;
   },
 
+  getMcpAgents: async (): Promise<{ id: number; name: string; status: string }[]> => {
+    const response = await api.get('/mcp/agents');
+    return response.data;
+  },
+
+  suspendMcpAgent: async (agentId: number): Promise<void> => {
+    await api.post(`/mcp/agents/${agentId}/suspend`);
+  },
+
   getAgentStats: async (agentId: string): Promise<AgentStats> => {
     const response = await api.get(`/agent/${agentId}`);
     return response.data;

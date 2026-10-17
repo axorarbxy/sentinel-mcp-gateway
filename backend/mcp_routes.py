@@ -10,7 +10,10 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 import json
 import os
+import re
 import time
+import uuid
+from urllib.parse import urlsplit
 from time_utils import utcnow
 
 from database import get_db, MCPAgent, MCPServer, MCPPolicy, AuditLog
@@ -88,6 +91,27 @@ def _validate_sqli_allowlist(value: List[str]) -> None:
         raise HTTPException(status_code=422, detail="SQLi allowlist contains an unknown indicator ID")
 
 
+def _validate_agent_upstream(url: Optional[str], name: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    normalized_url = (url or "").strip() or None
+    normalized_name = (name or "").strip() or None
+    if normalized_url:
+        parsed = urlsplit(normalized_url)
+        if (parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username
+                or parsed.password or parsed.query or parsed.fragment):
+            raise HTTPException(
+                status_code=422,
+                detail="Upstream URL must be an HTTP(S) URL without credentials, query, or fragment",
+            )
+    return normalized_url, normalized_name
+
+
+def _validate_token_env(value: Optional[str]) -> Optional[str]:
+    normalized = (value or "").strip() or None
+    if normalized and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", normalized):
+        raise HTTPException(status_code=422, detail="Upstream token must name a valid environment variable")
+    return normalized
+
+
 def _emit_agent_audit(db: Session, *, actor_id: Optional[int], agent_id: Optional[int], action: str, result: str, details: Optional[dict] = None):
     db.add(AuditLog(
         user_id=actor_id,
@@ -104,6 +128,11 @@ def _emit_agent_audit(db: Session, *, actor_id: Optional[int], agent_id: Optiona
 
 def _agent_is_active(agent: MCPAgent) -> bool:
     return bool(agent.is_active and agent.status in (None, "active", "suspended"))
+
+
+def _retire_agent_name(agent: MCPAgent) -> None:
+    """Release the unique normalized name while preserving the deleted record."""
+    agent.name_normalized = f"deleted-{agent.id}-{uuid.uuid4().hex}"
 
 
 def _to_agent_response(agent: MCPAgent, credential: Optional[str] = None) -> "AgentResponse":
@@ -132,6 +161,9 @@ def _to_agent_response(agent: MCPAgent, credential: Optional[str] = None) -> "Ag
         allowed_tools=allowed_tools,
         sql_mode_overrides=metadata.get("sql_mode_overrides", {}),
         sqli_allowlist=metadata.get("sqli_allowlist", []),
+        upstream_url=metadata.get("upstream_url"),
+        upstream_name=metadata.get("upstream_name"),
+        upstream_token_env=metadata.get("upstream_token_env"),
         credential_prefix=agent.credential_prefix,
         credential=credential,
         is_active=bool(agent.is_active and agent.status != "revoked"),
@@ -154,6 +186,9 @@ class AgentCreate(BaseModel):
     team: Optional[str] = Field(default=None, max_length=100)
     environment: str = Field(default="dev", min_length=1, max_length=32)
     allowed_tools: Optional[List[str]] = Field(default_factory=list)
+    upstream_url: Optional[str] = Field(default=None, max_length=500)
+    upstream_name: Optional[str] = Field(default=None, max_length=100)
+    upstream_token_env: Optional[str] = Field(default=None, max_length=100)
     risk_level: str = Field(default="low", min_length=1, max_length=20)
     metadata: Optional[dict] = Field(default_factory=dict)
     sql_mode_overrides: Optional[dict[str, str]] = None
@@ -169,6 +204,9 @@ class AgentUpdate(BaseModel):
     team: Optional[str] = Field(default=None, max_length=100)
     environment: Optional[str] = Field(default=None, min_length=1, max_length=32)
     allowed_tools: Optional[List[str]] = None
+    upstream_url: Optional[str] = Field(default=None, max_length=500)
+    upstream_name: Optional[str] = Field(default=None, max_length=100)
+    upstream_token_env: Optional[str] = Field(default=None, max_length=100)
     risk_level: Optional[str] = Field(default=None, min_length=1, max_length=20)
     metadata: Optional[dict] = None
     sql_mode_overrides: Optional[dict[str, str]] = None
@@ -185,6 +223,9 @@ class AgentResponse(BaseModel):
     status: str = "active"
     risk_level: str = "low"
     allowed_tools: List[str] = Field(default_factory=list)
+    upstream_url: Optional[str] = None
+    upstream_name: Optional[str] = None
+    upstream_token_env: Optional[str] = None
     sql_mode_overrides: dict[str, str] = Field(default_factory=dict)
     sqli_allowlist: List[str] = Field(default_factory=list)
     credential_prefix: Optional[str] = None
@@ -286,12 +327,37 @@ async def create_agent(agent_data: AgentCreate, request: Request, db: Session = 
     """Register a new MCP agent and return the credential once."""
     name = _normalize_name(agent_data.name)
     normalized = name.casefold()
-    if db.query(MCPAgent).filter(MCPAgent.name_normalized == normalized).first():
+    active_match = db.query(MCPAgent).filter(
+        MCPAgent.name_normalized == normalized,
+        MCPAgent.deleted_at.is_(None),
+    ).first()
+    if active_match:
         raise HTTPException(status_code=409, detail="An agent with this name already exists")
+
+    # Earlier soft-deleted records reserved their normalized names forever.
+    # Rename those internal keys before inserting the replacement agent.
+    retired_matches = db.query(MCPAgent).filter(
+        MCPAgent.name_normalized == normalized,
+        MCPAgent.deleted_at.is_not(None),
+    ).all()
+    for retired in retired_matches:
+        _retire_agent_name(retired)
+    if retired_matches:
+        db.flush()
 
     credential, credential_id, credential_prefix = create_agent_api_key()
 
     metadata = dict(agent_data.metadata or {})
+    for protected_key in ("upstream_url", "upstream_name", "upstream_token_env"):
+        metadata.pop(protected_key, None)
+    upstream_url, upstream_name = _validate_agent_upstream(agent_data.upstream_url, agent_data.upstream_name)
+    upstream_token_env = _validate_token_env(agent_data.upstream_token_env)
+    if upstream_url:
+        metadata["upstream_url"] = upstream_url
+    if upstream_name:
+        metadata["upstream_name"] = upstream_name
+    if upstream_token_env:
+        metadata["upstream_token_env"] = upstream_token_env
     if agent_data.sql_mode_overrides is not None:
         _validate_sql_mode_overrides(agent_data.sql_mode_overrides)
         metadata["sql_mode_overrides"] = agent_data.sql_mode_overrides
@@ -346,7 +412,11 @@ async def update_agent(agent_id: int, updates: AgentUpdate, request: Request, db
         raise HTTPException(status_code=404, detail="Agent not found")
     if updates.name:
         normalized = updates.name.strip().casefold()
-        if db.query(MCPAgent).filter(MCPAgent.id != agent.id, MCPAgent.name_normalized == normalized).first():
+        if db.query(MCPAgent).filter(
+            MCPAgent.id != agent.id,
+            MCPAgent.name_normalized == normalized,
+            MCPAgent.deleted_at.is_(None),
+        ).first():
             raise HTTPException(status_code=409, detail="An agent with this name already exists")
         agent.name = updates.name.strip(); agent.name_normalized = normalized
     for field in ["description", "owner", "team", "environment", "risk_level"]:
@@ -354,8 +424,43 @@ async def update_agent(agent_id: int, updates: AgentUpdate, request: Request, db
             setattr(agent, field, getattr(updates, field))
     if updates.allowed_tools is not None:
         agent.allowed_tools = json.dumps(_parse_tools(updates.allowed_tools))
+    if updates.upstream_url is not None or updates.upstream_name is not None or updates.upstream_token_env is not None:
+        try:
+            metadata = json.loads(agent.agent_metadata or "{}")
+        except (TypeError, ValueError):
+            metadata = {}
+        upstream_url, upstream_name = _validate_agent_upstream(
+            updates.upstream_url if updates.upstream_url is not None else metadata.get("upstream_url"),
+            updates.upstream_name if updates.upstream_name is not None else metadata.get("upstream_name"),
+        )
+        if upstream_url:
+            metadata["upstream_url"] = upstream_url
+        else:
+            metadata.pop("upstream_url", None)
+        if upstream_name:
+            metadata["upstream_name"] = upstream_name
+        else:
+            metadata.pop("upstream_name", None)
+        if updates.upstream_token_env is not None:
+            token_env = _validate_token_env(updates.upstream_token_env)
+            if token_env:
+                metadata["upstream_token_env"] = token_env
+            else:
+                metadata.pop("upstream_token_env", None)
+        agent.agent_metadata = json.dumps(metadata)
     if updates.metadata is not None:
-        agent.agent_metadata = json.dumps(updates.metadata or {})
+        supplied_metadata = dict(updates.metadata or {})
+        for protected_key in ("upstream_url", "upstream_name", "upstream_token_env"):
+            supplied_metadata.pop(protected_key, None)
+        try:
+            existing_metadata = json.loads(agent.agent_metadata or "{}")
+        except (TypeError, ValueError):
+            existing_metadata = {}
+        if isinstance(existing_metadata, dict):
+            for protected_key in ("upstream_url", "upstream_name", "upstream_token_env"):
+                if protected_key in existing_metadata:
+                    supplied_metadata[protected_key] = existing_metadata[protected_key]
+        agent.agent_metadata = json.dumps(supplied_metadata)
     metadata = {}
     try:
         metadata = json.loads(agent.agent_metadata or "{}")
@@ -401,6 +506,7 @@ async def delete_agent(agent_id: int, request: Request, db: Session = Depends(ge
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     agent.deleted_at = utcnow(); agent.is_active = False; agent.status = "revoked"
+    _retire_agent_name(agent)
     db.commit()
     actor_id = None
     auth = request.headers.get("Authorization", "")
@@ -455,6 +561,7 @@ async def revoke_agent(agent_id: int, request: Request, db: Session = Depends(ge
         raise HTTPException(status_code=404, detail="Agent not found")
     revoked_at = utcnow()
     agent.status = "revoked"; agent.is_active = False; agent.updated_at = revoked_at; agent.deleted_at = revoked_at
+    _retire_agent_name(agent)
     db.commit(); db.refresh(agent)
     actor_id = None
     auth = request.headers.get("Authorization", "")

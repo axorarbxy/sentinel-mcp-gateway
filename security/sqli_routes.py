@@ -56,7 +56,7 @@ async def get_sqli_indicators(
         indicators.append({
             **item,
             "severity": override.get("severity", item["severity"]),
-            "enabled": override.get("enabled", True),
+            "enabled": override.get("enabled", item.get("enabled", True)),
         })
     return {"indicators": indicators, "tool_modes": runtime["tool_modes"]}
 

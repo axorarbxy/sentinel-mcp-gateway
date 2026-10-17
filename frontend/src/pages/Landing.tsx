@@ -81,6 +81,10 @@ const Landing: React.FC = () => {
 
   const isAuthenticated = !!localStorage.getItem('access_token');
 
+  const scrollToSection = (sectionId: string) => {
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   return (
     <Box sx={{ bgcolor: 'background.default', minHeight: '100vh' }}>
       {/* Navigation */}
@@ -108,10 +112,10 @@ const Landing: React.FC = () => {
             </IconButton>
           ) : (
             <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-              <Button color="inherit" href="#features">
+              <Button color="inherit" onClick={() => scrollToSection('features')}>
                 Features
               </Button>
-              <Button color="inherit" href="#modules">
+              <Button color="inherit" onClick={() => scrollToSection('modules')}>
                 Modules
               </Button>
               <Button
@@ -258,7 +262,7 @@ const Landing: React.FC = () => {
       </Container>
 
       {/* Features Section - Using Box with flex instead of Grid */}
-      <Container maxWidth="lg" sx={{ py: 8 }} id="features">
+      <Container maxWidth="lg" sx={{ py: 8, scrollMarginTop: '80px' }} id="features">
         <Typography
           variant="h3"
           component="h2"
@@ -310,7 +314,7 @@ const Landing: React.FC = () => {
       </Container>
 
       {/* Modules Section - Using Box with flex instead of Grid */}
-      <Box sx={{ bgcolor: 'rgba(23, 18, 20, 0.65)', py: 8 }} id="modules">
+      <Box sx={{ bgcolor: 'rgba(23, 18, 20, 0.65)', py: 8, scrollMarginTop: '80px' }} id="modules">
         <Container maxWidth="lg">
           <Typography
             variant="h3"

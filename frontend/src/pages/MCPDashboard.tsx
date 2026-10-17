@@ -49,6 +49,7 @@ import {
   FiberManualRecord as LiveIcon,
   WifiOff as WifiOffIcon,
 } from '@mui/icons-material';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from 'recharts';
 import useLiveTraffic from '../hooks/useLiveTraffic';
 
 const API_URL = 'http://localhost:8001';
@@ -70,6 +71,22 @@ const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
       ...(options.headers || {}),
     },
   });
+};
+
+const getApiErrorMessage = (detail: unknown, fallback: string): string => {
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail.map((item: any) => {
+      if (typeof item === 'string') return item;
+      if (item && typeof item === 'object' && typeof item.msg === 'string') {
+        const location = Array.isArray(item.loc) ? item.loc.filter(Boolean).join('.') : '';
+        return location ? `${location}: ${item.msg}` : item.msg;
+      }
+      return '';
+    }).filter(Boolean);
+    if (messages.length) return messages.join('; ');
+  }
+  return fallback;
 };
 
 // ============ TYPES ============
@@ -150,6 +167,9 @@ const MCPDashboard: React.FC = () => {
     environment: 'dev',
     risk_level: 'low',
     allowed_tools: '',
+    upstream_url: '',
+    upstream_name: '',
+    upstream_token_env: '',
   });
   const [newPolicy, setNewPolicy] = useState({
     name: '',
@@ -240,13 +260,17 @@ const MCPDashboard: React.FC = () => {
         setCreatedCredential(nextCredential);
         showSnackbar('Agent created successfully. Copy the key now.', 'success');
         setAddAgentOpen(false);
-        setNewAgent({ name: '', description: '', owner: '', team: '', environment: 'dev', risk_level: 'low', allowed_tools: '' });
+        setNewAgent({ name: '', description: '', owner: '', team: '', environment: 'dev', risk_level: 'low', allowed_tools: '', upstream_url: '', upstream_name: '', upstream_token_env: '' });
         fetchAll();
       } else {
-        showSnackbar(payload.detail || 'Failed to create agent', 'error');
+        showSnackbar(getApiErrorMessage(payload.detail, 'Failed to create agent'), 'error');
       }
-    } catch {
-      showSnackbar('Network error', 'error');
+    } catch (error) {
+      console.error('Failed to create MCP agent:', error);
+      showSnackbar(
+        'Could not reach the Sentinel API. Check that the backend is running on port 8001 and that this frontend origin is allowed by SENTINEL_CORS_ORIGINS.',
+        'error',
+      );
     }
   };
 
@@ -302,7 +326,12 @@ const MCPDashboard: React.FC = () => {
   const handleDeleteAgent = async (id: number) => {
     if (!window.confirm('Delete this agent?')) return;
     try {
-      await fetchWithAuth(`${API_URL}/mcp/agents/${id}`, { method: 'DELETE' });
+      const res = await fetchWithAuth(`${API_URL}/mcp/agents/${id}`, { method: 'DELETE' });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showSnackbar(getApiErrorMessage(payload.detail, 'Failed to delete agent'), 'error');
+        return;
+      }
       showSnackbar('Agent deleted', 'success');
       fetchAll();
     } catch {
@@ -375,14 +404,6 @@ const MCPDashboard: React.FC = () => {
     return 'default';
   };
 
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
-
   // Use live stats if available, else DB stats
   const effectiveTotal = wsConnected && liveStats.total_requests > 0
     ? liveStats.total_requests
@@ -391,18 +412,79 @@ const MCPDashboard: React.FC = () => {
     ? liveStats.total_blocked
     : overview?.traffic.blocked_requests || 0;
 
+  const trafficSeries = React.useMemo(() => {
+    const now = Date.now();
+    return Array.from({ length: 12 }, (_, index) => {
+      const bucketStart = now - (11 - index) * 5 * 60_000;
+      const bucketEnd = bucketStart + 5 * 60_000;
+      const bucketEvents = liveEvents.filter((event) => {
+        const timestamp = new Date(event.timestamp).getTime();
+        return timestamp >= bucketStart && timestamp < bucketEnd;
+      });
+      return {
+        time: new Date(bucketStart).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        requests: bucketEvents.length,
+        blocked: bucketEvents.filter((event) => event.decision === 'block').length,
+        flagged: bucketEvents.filter((event) => event.decision === 'flag').length,
+      };
+    });
+  }, [liveEvents]);
+
+  const decisionMix = React.useMemo(() => {
+    const recent = liveEvents.slice(0, 50);
+    if (recent.length) {
+      return [
+        { name: 'Allowed', value: recent.filter((event) => event.decision === 'allow').length, color: '#56E0C3' },
+        { name: 'Flagged', value: recent.filter((event) => event.decision === 'flag').length, color: '#F4B85E' },
+        { name: 'Blocked', value: recent.filter((event) => event.decision === 'block').length, color: '#FF6E78' },
+      ];
+    }
+    const blocked = overview?.traffic.blocked_requests || 0;
+    const allowed = overview?.traffic.allowed_requests || 0;
+    return [
+      { name: 'Allowed', value: allowed, color: '#56E0C3' },
+      { name: 'Flagged', value: Math.max(0, (overview?.traffic.total_requests || 0) - blocked - allowed), color: '#F4B85E' },
+      { name: 'Blocked', value: blocked, color: '#FF6E78' },
+    ];
+  }, [liveEvents, overview]);
+
+  const agentActivity = React.useMemo(() => agents
+    .filter((agent) => agent.total_requests > 0)
+    .sort((a, b) => b.total_requests - a.total_requests)
+    .slice(0, 6)
+    .map((agent) => ({
+      name: agent.name.length > 16 ? `${agent.name.slice(0, 14)}…` : agent.name,
+      requests: agent.total_requests,
+      blocked: agent.blocked_requests,
+    })), [agents]);
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
   return (
     <Box sx={{ p: 3, maxWidth: 1400, mx: 'auto' }}>
       {/* Header */}
       {createdCredential && (
         <Alert severity="warning" sx={{ mb: 3 }} action={
-          <Button color="inherit" size="small" onClick={() => navigator.clipboard.writeText(createdCredential)}>
-            Copy key
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button color="inherit" size="small" onClick={() => navigator.clipboard.writeText(createdCredential)}>
+              Copy key
+            </Button>
+            <Button color="inherit" size="small" onClick={() => navigator.clipboard.writeText(
+              `[mcp_servers.sentinel]\ncommand = "python"\nargs = ["R:\\\\sentinel-mcp-gateway\\\\backend\\\\sentinel_mcp_stdio_bridge.py"]\nenv = { SENTINEL_AGENT_API_KEY = "${createdCredential}" }`
+            )}>
+              Copy Codex config
+            </Button>
+          </Box>
         }>
           <strong>Credential created:</strong> {createdCredential}
           <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
-            This credential is shown once. Store it securely; it will not be displayed again.
+            This credential is shown once. The Codex config connects the local stdio bridge to Sentinel. Keep config.toml private.
           </Typography>
         </Alert>
       )}
@@ -534,6 +616,45 @@ const MCPDashboard: React.FC = () => {
               </Typography>
             </CardContent>
           </Card>
+        </Grid>
+      </Grid>
+
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid size={{ xs: 12, lg: 7 }}>
+          <Paper sx={{ p: { xs: 2, md: 2.6 }, height: 350, background: 'linear-gradient(145deg,rgba(16,26,37,.98),rgba(12,19,28,.98))' }}>
+            <Box sx={{ display: 'flex', alignItems: 'start', justifyContent: 'space-between', gap: 1, mb: 1.8 }}>
+              <Box><Typography sx={{ fontWeight: 800 }}>Request activity</Typography><Typography variant="caption" color="text.secondary">5-minute windows · live gateway events</Typography></Box>
+              <Chip size="small" label={wsConnected ? 'STREAMING' : 'RECENT DATA'} color={wsConnected ? 'success' : 'default'} sx={{ fontSize: 9, fontWeight: 800, letterSpacing: .5 }} />
+            </Box>
+            <ResponsiveContainer width="100%" height="82%">
+              <AreaChart data={trafficSeries} margin={{ top: 8, right: 5, left: -22, bottom: 0 }}>
+                <defs><linearGradient id="mcpRequestFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#56E0C3" stopOpacity={.35} /><stop offset="100%" stopColor="#56E0C3" stopOpacity={0} /></linearGradient></defs>
+                <CartesianGrid stroke="rgba(154,175,193,.10)" vertical={false} />
+                <XAxis dataKey="time" tick={{ fill: '#8293A0', fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={24} />
+                <YAxis allowDecimals={false} tick={{ fill: '#8293A0', fontSize: 10 }} axisLine={false} tickLine={false} />
+                <ChartTooltip contentStyle={{ background: '#111c27', border: '1px solid rgba(154,175,193,.18)', borderRadius: 10, color: '#eef7f6' }} />
+                <Area type="monotone" dataKey="requests" stroke="#56E0C3" strokeWidth={2.5} fill="url(#mcpRequestFill)" name="Requests" />
+                <Area type="monotone" dataKey="flagged" stroke="#F4B85E" strokeWidth={1.6} fill="none" name="Flagged" />
+                <Area type="monotone" dataKey="blocked" stroke="#FF6E78" strokeWidth={1.6} fill="none" name="Blocked" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </Paper>
+        </Grid>
+        <Grid size={{ xs: 12, md: 6, lg: 2.5 }}>
+          <Paper sx={{ p: { xs: 2, md: 2.6 }, height: 350, background: 'linear-gradient(145deg,rgba(16,26,37,.98),rgba(12,19,28,.98))' }}>
+            <Typography sx={{ fontWeight: 800 }}>Decision mix</Typography><Typography variant="caption" color="text.secondary">{liveEvents.length ? 'Last 50 live events' : 'All recorded requests'}</Typography>
+            <Box sx={{ height: 200, position: 'relative', mt: 1 }}>
+              <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={decisionMix.filter((entry) => entry.value > 0)} dataKey="value" nameKey="name" innerRadius={57} outerRadius={82} paddingAngle={4} stroke="none">{decisionMix.map((entry) => <Cell key={entry.name} fill={entry.color} />)}</Pie><ChartTooltip contentStyle={{ background: '#111c27', border: '1px solid rgba(154,175,193,.18)', borderRadius: 10 }} /></PieChart></ResponsiveContainer>
+              <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeContent: 'center', pointerEvents: 'none', textAlign: 'center' }}><Typography variant="h5" sx={{ fontWeight: 850 }}>{effectiveTotal.toLocaleString()}</Typography><Typography sx={{ color: '#8293A0', fontSize: 9, letterSpacing: 1 }}>REQUESTS</Typography></Box>
+            </Box>
+            <Box sx={{ display: 'grid', gap: .9, mt: .4 }}>{decisionMix.map((entry) => <Box key={entry.name} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Box sx={{ width: 7, height: 7, bgcolor: entry.color, borderRadius: '50%' }} /><Typography sx={{ flex: 1, color: '#9BAAB7', fontSize: 11 }}>{entry.name}</Typography><Typography sx={{ fontSize: 11, fontWeight: 800 }}>{entry.value.toLocaleString()}</Typography></Box>)}</Box>
+          </Paper>
+        </Grid>
+        <Grid size={{ xs: 12, md: 6, lg: 2.5 }}>
+          <Paper sx={{ p: { xs: 2, md: 2.6 }, height: 350, background: 'linear-gradient(145deg,rgba(16,26,37,.98),rgba(12,19,28,.98))' }}>
+            <Typography sx={{ fontWeight: 800 }}>Agent activity</Typography><Typography variant="caption" color="text.secondary">Requests by registered agent</Typography>
+            {agentActivity.length ? <ResponsiveContainer width="100%" height="86%"><BarChart data={agentActivity} layout="vertical" margin={{ top: 14, right: 8, left: 2, bottom: 0 }}><CartesianGrid stroke="rgba(154,175,193,.09)" horizontal={false} /><XAxis type="number" allowDecimals={false} hide /><YAxis type="category" dataKey="name" width={88} tick={{ fill: '#A9B7C2', fontSize: 9 }} axisLine={false} tickLine={false} /><ChartTooltip contentStyle={{ background: '#111c27', border: '1px solid rgba(154,175,193,.18)', borderRadius: 10 }} /><Bar dataKey="requests" fill="#56E0C3" radius={[0, 5, 5, 0]} barSize={12} name="Requests" /><Bar dataKey="blocked" fill="#FF6E78" radius={[0, 5, 5, 0]} barSize={12} name="Blocked" /></BarChart></ResponsiveContainer> : <Box sx={{ height: '82%', display: 'grid', placeItems: 'center', textAlign: 'center' }}><Typography variant="body2" color="text.secondary">Agent request totals will appear as traffic is recorded.</Typography></Box>}
+          </Paper>
         </Grid>
       </Grid>
 
@@ -958,6 +1079,32 @@ const MCPDashboard: React.FC = () => {
             onChange={(e) => setNewAgent({ ...newAgent, allowed_tools: e.target.value })}
             margin="normal"
             helperText="Optional, comma-separated tool names. Set this to create a restricted agent for policy demos."
+          />
+          <TextField
+            fullWidth
+            label="MCP upstream URL"
+            placeholder="http://127.0.0.1:8765/mcp"
+            value={newAgent.upstream_url}
+            onChange={(e) => setNewAgent({ ...newAgent, upstream_url: e.target.value })}
+            margin="normal"
+            helperText="Optional. Routes this agent to its own Streamable HTTP MCP server; blank uses the gateway default."
+          />
+          <TextField
+            fullWidth
+            label="Upstream display name"
+            value={newAgent.upstream_name}
+            onChange={(e) => setNewAgent({ ...newAgent, upstream_name: e.target.value })}
+            margin="normal"
+            helperText="Optional label shown in event records."
+          />
+          <TextField
+            fullWidth
+            label="Upstream bearer token environment variable"
+            placeholder="MY_MCP_SERVER_TOKEN"
+            value={newAgent.upstream_token_env}
+            onChange={(e) => setNewAgent({ ...newAgent, upstream_token_env: e.target.value })}
+            margin="normal"
+            helperText="Optional. Store the upstream secret in the gateway process environment under this name."
           />
           <Alert severity="info" sx={{ mt: 2 }}>
             An API key will be generated automatically. Save it securely.
