@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Avatar, Box, Card, CardContent, Chip, Divider, Grid, IconButton, LinearProgress, Paper, Tooltip, Typography } from '@mui/material';
+import { Avatar, Box, Button, Card, CardContent, Chip, Divider, FormControl, Grid, IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Tooltip, Typography } from '@mui/material';
 import { Block as BlockIcon, CheckCircle as CheckCircleIcon, ErrorOutlined as ErrorIcon, Hub as HubIcon, Refresh as RefreshIcon, Security as SecurityIcon, Timeline as TimelineIcon, Warning as WarningIcon } from '@mui/icons-material';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from 'recharts';
-import { gatewayApi } from '../services/api';
+import { gatewayApi, gatewayFetch } from '../services/api';
 import { LogEntry, StatsResponse } from '../types';
-import useLiveTraffic, { TrafficEvent } from '../hooks/useLiveTraffic';
+import useLiveTraffic, { ObservableFeatureFamilies, TrafficEvent } from '../hooks/useLiveTraffic';
 import ExtensionBanner from './ExtensionBanner';
 
 const DETECTION_CATEGORIES = [
@@ -24,6 +24,31 @@ interface MCPOverview {
   traffic: { total_requests: number; blocked_requests: number; allowed_requests: number };
 }
 
+interface BehavioralMonitorStatus {
+  agents_monitored: number;
+  training_samples: number;
+  learning_quarantined: number;
+  learning_policy: string;
+  online_scoring: string;
+  federated_updates: { status: string; mode: string; reason: string };
+  enforcement: string;
+}
+
+interface AttackSimulationReport {
+  simulation_id: string;
+  scenario: string;
+  synthetic: boolean;
+  upstream_calls: number;
+  persisted_events: number;
+  events_broadcast: number;
+  static_policy_decision: string;
+  static_policy_miss: boolean;
+  static_policy_summary: string;
+  ml_detected_events: number;
+  cep_findings: { rule_id: string; summary: string }[];
+  events: { event_id: string; policy_decision: string; policy_matched_rules: string[]; ml_detected: boolean; ml_explanation: { feature: string; observed_z_score: number }[]; cep_findings: string[] }[];
+}
+
 const formatAge = (timestamp?: string) => {
   if (!timestamp) return 'No events received';
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000));
@@ -34,6 +59,12 @@ const Dashboard: React.FC = () => {
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [mcpOverview, setMcpOverview] = useState<MCPOverview | null>(null);
+  const [behavioralStatus, setBehavioralStatus] = useState<BehavioralMonitorStatus | null>(null);
+  const [simulation, setSimulation] = useState<AttackSimulationReport | null>(null);
+  const [simulationError, setSimulationError] = useState<string | null>(null);
+  const [simulationRunning, setSimulationRunning] = useState(false);
+  const [simulationScenario, setSimulationScenario] = useState<'novel_sensitive_tool' | 'cross_agent_payload_fanout'>('novel_sensitive_tool');
+  const [liveClock, setLiveClock] = useState(Date.now());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { connected, events } = useLiveTraffic();
@@ -54,13 +85,23 @@ const Dashboard: React.FC = () => {
           console.error('Unable to load persisted MCP overview:', requestError);
           return null;
         });
+      const behavioralRequest = fetch(`${API_URL}/api/ml/behavioral-monitor`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }).then(async (response) => {
+        if (!response.ok) throw new Error(`Behavioral monitor request failed (${response.status})`);
+        return await response.json() as BehavioralMonitorStatus;
+      }).catch((requestError) => {
+        console.error('Unable to load behavioral model status:', requestError);
+        return null;
+      });
       const [statsData, logsData] = await Promise.all([
         gatewayApi.getStats(), gatewayApi.getLogs(200),
       ]);
-      const overviewData = await overviewRequest;
+      const [overviewData, behavioralData] = await Promise.all([overviewRequest, behavioralRequest]);
       setStats(statsData);
       setLogs(logsData.logs);
       setMcpOverview(overviewData);
+      setBehavioralStatus(behavioralData);
       setError(null);
     } catch {
       setError('Unable to reach the gateway on port 8001.');
@@ -68,6 +109,25 @@ const Dashboard: React.FC = () => {
       setLoading(false);
     }
   }, []);
+
+  const runAttackSimulation = useCallback(async () => {
+    setSimulationRunning(true);
+    setSimulationError(null);
+    try {
+      const response = await gatewayFetch('/api/demo/attack-simulation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scenario: simulationScenario }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || `Simulation request failed (${response.status})`);
+      setSimulation(result as AttackSimulationReport);
+    } catch (error) {
+      setSimulationError(error instanceof Error ? error.message : 'Unable to run the synthetic simulation.');
+    } finally {
+      setSimulationRunning(false);
+    }
+  }, [simulationScenario]);
 
   useEffect(() => {
     fetchData();
@@ -78,6 +138,11 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     if (events.length) fetchData();
   }, [events.length, fetchData]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setLiveClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const traffic = useMemo(() => {
     return (stats?.traffic_by_hour || []).map((item) => ({
@@ -102,6 +167,98 @@ const Dashboard: React.FC = () => {
     { name: 'Allowed', value: Math.max(0, (stats?.total_requests || 0) - (stats?.blocked || 0)), color: '#26a69a' },
     { name: 'Blocked', value: stats?.blocked || 0, color: '#ef5350' },
   ], [stats]);
+
+  const liveWindow = useMemo(() => {
+    const cutoff = liveClock - 60_000;
+    const recent = events.filter((event) => {
+      const timestamp = new Date(event.timestamp).getTime();
+      return Number.isFinite(timestamp) && timestamp >= cutoff && timestamp <= liveClock;
+    });
+    const buckets = Array.from({ length: 6 }, (_, index) => {
+      const start = liveClock - 60_000 + index * 10_000;
+      const end = start + 10_000;
+      const items = recent.filter((event) => {
+        const timestamp = new Date(event.timestamp).getTime();
+        return timestamp >= start && timestamp < end;
+      });
+      return {
+        time: new Date(end).toLocaleTimeString([], { minute: '2-digit', second: '2-digit' }),
+        requests: items.length,
+        blocked: items.filter((event) => event.decision === 'block').length,
+      };
+    });
+    const latencies = recent.map((event) => event.latency_ms).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    return {
+      recent,
+      buckets,
+      blocked: recent.filter((event) => event.decision === 'block').length,
+      flagged: recent.filter((event) => event.decision === 'flag' || event.ml_anomaly).length,
+      averageLatency: latencies.length ? Math.round(latencies.reduce((sum, value) => sum + value, 0) / latencies.length) : null,
+    };
+  }, [events, liveClock]);
+
+  const hybridWindow = useMemo(() => {
+    const cutoff = liveClock - 5 * 60_000;
+    const recent = events.filter((event) => {
+      const timestamp = new Date(event.timestamp).getTime();
+      return Number.isFinite(timestamp) && timestamp >= cutoff && timestamp <= liveClock;
+    });
+    const correlations = recent.filter((event) => event.decision_source === 'cep' || event.method === 'security/correlation');
+    return {
+      policyBlocks: recent.filter((event) => event.decision === 'block' && event.decision_source !== 'cep').length,
+      mlAnomalies: recent.filter((event) => event.ml_anomaly).length,
+      cepCorrelations: correlations.length,
+      correlations: correlations.slice(0, 4),
+      featureEvents: recent.filter((event) => event.observable_features),
+      ruleHits: recent.reduce((total, event) => total + event.matched_rule_ids.length, 0),
+    };
+  }, [events, liveClock]);
+
+  const latestFeatures: ObservableFeatureFamilies | undefined = hybridWindow.featureEvents[0]?.observable_features;
+  const featureFamilies: { key: string; label: string; requirement: string; signals: string[]; failureModes: string[]; values?: Record<string, string | number | boolean | null> }[] = [
+    {
+      key: 'identity', label: 'Identity',
+      requirement: 'Who produced the event, and which environment does it belong to?',
+      signals: ['Unknown or drifting principal', 'Environment mismatch'],
+      failureModes: ['Agent impersonation', 'Stolen or misused credentials'],
+      values: latestFeatures?.identity,
+    },
+    {
+      key: 'topics', label: 'Topics and routing',
+      requirement: 'Which channel, event type, method, and upstream carried it?',
+      signals: ['Unexpected topic/type/method combination', 'Cross-agent route fan-out'],
+      failureModes: ['Topic confusion or injection', 'Unauthorized cross-tenant delivery'],
+      values: latestFeatures?.topics,
+    },
+    {
+      key: 'timing', label: 'Timing and ordering',
+      requirement: 'How quickly events arrive, and whether they arrive fresh and in sequence.',
+      signals: ['Burst rate or unusual delay', 'Replay, duplicate, or ordering gap'],
+      failureModes: ['Queue buildup or event replay', 'Denial of service or stale decisions'],
+      values: latestFeatures?.timing,
+    },
+    {
+      key: 'payload_summary', label: 'Payload summaries',
+      requirement: 'Use size, shape, hashes, and finding counts without copying raw arguments.',
+      signals: ['Schema, size, or nesting drift', 'Injection and policy-rule matches'],
+      failureModes: ['Parser/resource exhaustion', 'Injection, truncation, or malformed events'],
+      values: latestFeatures?.payload_summary,
+    },
+    {
+      key: 'graph_structure', label: 'Graph structure',
+      requirement: 'Track repeated agent-to-tool, agent-to-upstream, and agent-to-topic edges.',
+      signals: ['Novel or unusually repeated edges', 'High fan-out or cross-agent overlap'],
+      failureModes: ['Privilege pivot or lateral movement', 'Unexpected data-exfiltration paths'],
+      values: latestFeatures?.graph_structure,
+    },
+    {
+      key: 'broker_state', label: 'Broker and consumer state',
+      requirement: 'Observe producer, consumer group, retries, cursor, and transport protection.',
+      signals: ['Delivery retries or rising event age', 'Missing schema or transport protection'],
+      failureModes: ['Tampering, duplicate, or dropped events', 'Consumer backlog or broker outage'],
+      values: latestFeatures?.broker_state,
+    },
+  ];
 
   if (loading) return <LinearProgress sx={{ mt: 4 }} />;
   if (error || !stats) return <Paper sx={{ p: 4, m: 3, textAlign: 'center' }}><ErrorIcon color="error" sx={{ fontSize: 44 }} /><Typography variant="h6" sx={{ mt: 1 }}>{error || 'Gateway data is unavailable.'}</Typography><IconButton aria-label="Retry" onClick={fetchData}><RefreshIcon /></IconButton></Paper>;
@@ -131,7 +288,174 @@ const Dashboard: React.FC = () => {
       <Typography variant="body2" color="text.secondary">{connected ? `WebSocket connected. Last event ${formatAge(lastEvent)}.` : 'REST data may still be available; live event updates will resume when the gateway reconnects.'}</Typography>
     </Paper>
 
+    <Paper sx={{ p: 2.5, mb: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap' }}>
+        <Box>
+          <Typography variant="h6">Online model governance</Typography>
+          <Typography variant="caption" color="text.secondary">Anomalies are scored against each agent’s learned baseline and explained with the strongest feature deviations.</Typography>
+        </Box>
+        <Chip size="small" label={behavioralStatus?.online_scoring === 'active' ? 'ONLINE SCORING' : 'MODEL WARMING UP'} color={behavioralStatus?.online_scoring === 'active' ? 'success' : 'default'} variant="outlined" />
+      </Box>
+      <Grid container spacing={2} sx={{ mt: .5 }}>
+        <Grid size={{ xs: 12, sm: 4 }}><Typography variant="overline" color="text.secondary">Trained agents</Typography><Typography variant="h5">{behavioralStatus?.agents_monitored ?? 0}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 4 }}><Typography variant="overline" color="text.secondary">Clean baseline samples</Typography><Typography variant="h5">{behavioralStatus?.training_samples ?? 0}</Typography></Grid>
+        <Grid size={{ xs: 12, sm: 4 }}><Typography variant="overline" color="text.secondary">Anomalies held out of learning</Typography><Typography variant="h5">{behavioralStatus?.learning_quarantined ?? 0}</Typography></Grid>
+      </Grid>
+      <Typography variant="body2" sx={{ mt: 1 }}>{behavioralStatus?.enforcement || 'Deterministic policy and CEP remain authoritative.'}</Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: .5 }}>
+        Federated updates: {behavioralStatus?.federated_updates.status || 'status unavailable'} · {behavioralStatus?.federated_updates.reason || 'Signed aggregator not configured.'}
+      </Typography>
+      <Typography variant="caption" color="text.secondary">Learning gate: {behavioralStatus?.learning_policy || 'only allowed, non-anomalous events update the baseline.'}</Typography>
+    </Paper>
+
+    <Paper sx={{ p: 2.5, mb: 3, borderLeft: '4px solid #ab47bc' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap' }}>
+        <Box>
+          <Typography variant="h6">Synthetic event-stream attack lab</Typography>
+          <Typography variant="caption" color="text.secondary">A safe, ephemeral prototype: generated traces pass through the policy evaluator, online anomaly scorer, CEP correlator, and live WebSocket.</Typography>
+        </Box>
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+          <FormControl size="small" sx={{ minWidth: 245 }}>
+            <InputLabel id="attack-scenario-label">Synthetic scenario</InputLabel>
+            <Select labelId="attack-scenario-label" label="Synthetic scenario" value={simulationScenario} onChange={(event) => {
+              setSimulationScenario(event.target.value as typeof simulationScenario);
+              setSimulation(null);
+            }}>
+              <MenuItem value="novel_sensitive_tool">Novel behavior on filesystem/write</MenuItem>
+              <MenuItem value="cross_agent_payload_fanout">Cross-agent payload fan-out</MenuItem>
+            </Select>
+          </FormControl>
+          <Button variant="contained" color="secondary" onClick={runAttackSimulation} disabled={simulationRunning}>
+            {simulationRunning ? 'Running simulation…' : 'Run synthetic replay'}
+          </Button>
+        </Box>
+      </Box>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>Replays 3 synthetic requests through policy, online ML, and CEP; choose novel tool drift or suspicious cross-agent fan-out. No upstream calls or database persistence. Requires gateway:write.</Typography>
+      {simulationRunning && <LinearProgress sx={{ mt: 1.5 }} />}
+      {simulationError && <Typography color="error.main" variant="body2" sx={{ mt: 1.5 }}>{simulationError}</Typography>}
+      {simulation && <Box sx={{ mt: 2 }}>
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1 }}>
+          <Chip size="small" color={simulation.static_policy_decision === 'allow' ? 'success' : 'error'} variant="outlined" label={`Static policy: ${simulation.static_policy_decision}`} />
+          <Chip size="small" color={simulation.ml_detected_events ? 'warning' : 'default'} variant="outlined" label={`Online ML: ${simulation.ml_detected_events}/${simulation.events_broadcast}`} />
+          <Chip size="small" color={simulation.cep_findings.length ? 'error' : 'default'} variant="outlined" label={`CEP: ${simulation.cep_findings.length} findings`} />
+          <Chip size="small" color={simulation.static_policy_miss ? 'warning' : 'success'} variant="outlined" label={simulation.static_policy_miss ? 'Static-rule miss demonstrated' : 'No static-rule miss'} />
+          <Chip size="small" color="secondary" label="SYNTHETIC" />
+        </Box>
+        <Typography variant="body2" color="text.secondary">{simulation.static_policy_summary}</Typography>
+        {simulation.events.map((event) => <Box key={event.event_id} sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', py: .75, borderTop: '1px solid', borderColor: 'divider' }}>
+          <Chip size="small" label={event.event_id.slice(-1)} />
+          <Typography variant="body2" sx={{ minWidth: 100 }}>Policy {event.policy_decision} · ML {event.ml_detected ? 'anomaly' : 'normal'}</Typography>
+          <Typography variant="caption" color="text.secondary">Rules: {event.policy_matched_rules.length ? event.policy_matched_rules.join(', ') : 'none matched'}</Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>{event.ml_explanation.map((item) => `${item.feature} ${item.observed_z_score > 0 ? '+' : ''}${item.observed_z_score}σ`).join(' · ') || 'No feature deviations returned'}</Typography>
+          {event.cep_findings.map((rule) => <Chip key={`${event.event_id}-${rule}`} size="small" color="warning" variant="outlined" label={rule} />)}
+          <Chip size="small" color="secondary" variant="outlined" label="DEMO EVENT" />
+        </Box>)}
+      </Box>}
+    </Paper>
+
     <Grid container spacing={2} sx={{ mb: 3 }}>{metricCards.map((card) => <Grid key={card.label} size={{ xs: 12, sm: 6, md: 3 }}><Card><CardContent><Box sx={{ display: 'flex', justifyContent: 'space-between' }}><Typography variant="overline">{card.label}</Typography><Avatar sx={{ bgcolor: `${card.color}22`, color: card.color }}>{card.icon}</Avatar></Box><Typography variant="h3" sx={{ fontWeight: 700 }}>{card.value.toLocaleString()}</Typography><Typography variant="caption" color="text.secondary">{card.hint}</Typography></CardContent></Card></Grid>)}</Grid>
+
+    <Paper sx={{ p: 2.5, mb: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap', mb: 1 }}>
+        <Box><Typography variant="h6">Live traffic pulse</Typography><Typography variant="caption" color="text.secondary">Rolling 60-second window from incoming gateway events · refreshes in real time</Typography></Box>
+        <Chip size="small" icon={<HubIcon />} label={connected ? 'STREAM CONNECTED' : 'WAITING FOR STREAM'} color={connected ? 'success' : 'warning'} variant="outlined" />
+      </Box>
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 6, sm: 3 }}><Typography variant="overline" color="text.secondary">Requests / 60s</Typography><Typography variant="h4" sx={{ fontWeight: 700 }}>{liveWindow.recent.length}</Typography></Grid>
+        <Grid size={{ xs: 6, sm: 3 }}><Typography variant="overline" color="text.secondary">Blocked</Typography><Typography variant="h4" sx={{ fontWeight: 700, color: '#ef5350' }}>{liveWindow.blocked}</Typography></Grid>
+        <Grid size={{ xs: 6, sm: 3 }}><Typography variant="overline" color="text.secondary">Flagged</Typography><Typography variant="h4" sx={{ fontWeight: 700, color: '#ffb74d' }}>{liveWindow.flagged}</Typography></Grid>
+        <Grid size={{ xs: 6, sm: 3 }}><Typography variant="overline" color="text.secondary">Avg. latency</Typography><Typography variant="h4" sx={{ fontWeight: 700 }}>{liveWindow.averageLatency === null ? '—' : `${liveWindow.averageLatency} ms`}</Typography></Grid>
+      </Grid>
+      <ResponsiveContainer width="100%" height={170}>
+        <AreaChart data={liveWindow.buckets}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis dataKey="time" tick={{ fill: '#9BAAB7', fontSize: 12 }} />
+          <YAxis allowDecimals={false} tick={{ fill: '#9BAAB7', fontSize: 12 }} />
+          <ChartTooltip contentStyle={chartTooltipStyle} />
+          <Legend />
+          <Area type="monotone" dataKey="requests" stroke="#42a5f5" fill="#42a5f522" name="Requests" />
+          <Area type="monotone" dataKey="blocked" stroke="#ef5350" fill="#ef535022" name="Blocked" />
+        </AreaChart>
+      </ResponsiveContainer>
+      {!liveWindow.recent.length && <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: -1 }}>Waiting for gateway events. New MCP requests will appear here as they arrive.</Typography>}
+    </Paper>
+
+    <Paper sx={{ p: 2.5, mb: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap', mb: 2 }}>
+        <Box>
+          <Typography variant="h6">Hybrid security layer</Typography>
+          <Typography variant="caption" color="text.secondary">ML and behavioral analysis detect drift; synchronous policy rules block known unsafe calls; CEP correlates event sequences.</Typography>
+        </Box>
+        <Chip size="small" label={connected ? 'LIVE · LAST 5 MIN' : 'STREAM RECONNECTING'} color={connected ? 'success' : 'warning'} variant="outlined" />
+      </Box>
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <Card variant="outlined" sx={{ height: '100%' }}><CardContent>
+            <Typography variant="overline" color="text.secondary">Deterministic enforcement</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 700, color: '#ef5350' }}>{hybridWindow.policyBlocks}</Typography>
+            <Typography variant="body2" color="text.secondary">Blocked by gateway policies in the live window</Typography>
+            <Typography variant="caption" color="text.secondary">{hybridWindow.ruleHits} matched policy / CEP rules</Typography>
+          </CardContent></Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <Card variant="outlined" sx={{ height: '100%' }}><CardContent>
+            <Typography variant="overline" color="text.secondary">Behavioral model</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 700, color: '#42a5f5' }}>{hybridWindow.mlAnomalies}</Typography>
+            <Typography variant="body2" color="text.secondary">Events outside learned agent behavior</Typography>
+            <Typography variant="caption" color="text.secondary">{stats.ml_models || 0} trained model{stats.ml_models === 1 ? '' : 's'} active</Typography>
+          </CardContent></Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <Card variant="outlined" sx={{ height: '100%' }}><CardContent>
+            <Typography variant="overline" color="text.secondary">CEP correlations</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 700, color: '#ffb74d' }}>{hybridWindow.cepCorrelations}</Typography>
+            <Typography variant="body2" color="text.secondary">Cross-event patterns detected in the last 5 minutes</Typography>
+            <Typography variant="caption" color="text.secondary">Burst, rule-campaign, fan-out, and behavior-drift rules</Typography>
+          </CardContent></Card>
+        </Grid>
+      </Grid>
+      {hybridWindow.correlations.length > 0 ? <Box sx={{ mt: 2 }}>
+        <Typography variant="subtitle2" sx={{ mb: .5 }}>Latest CEP findings</Typography>
+        {hybridWindow.correlations.map((event) => <Box key={event.event_id} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: .75, borderTop: '1px solid', borderColor: 'divider', flexWrap: 'wrap' }}>
+          <Chip size="small" color="warning" label={event.matched_rule_ids[0] || 'CEP'} />
+          <Typography variant="body2" sx={{ flex: 1, minWidth: 200 }}>{event.decision_reason}</Typography>
+          {event.correlation_window_seconds ? <Typography variant="caption" color="text.secondary">{event.correlation_window_seconds}s window</Typography> : null}
+          <Typography variant="caption" color="text.secondary">{new Date(event.timestamp).toLocaleTimeString()}</Typography>
+        </Box>)}
+      </Box> : <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>No CEP threshold has fired in the last 5 minutes. Policy blocks and model flags continue to appear as events arrive.</Typography>}
+    </Paper>
+
+    <Paper sx={{ p: 2.5, mb: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap', mb: 2 }}>
+        <Box>
+          <Typography variant="h6">Event security feature map</Typography>
+          <Typography variant="caption" color="text.secondary">Security requirements mapped to six observable feature families on each consumed broker event.</Typography>
+        </Box>
+        <Chip size="small" label={`${hybridWindow.featureEvents.length} instrumented live events · 5 min`} color={hybridWindow.featureEvents.length ? 'info' : 'default'} variant="outlined" />
+      </Box>
+      <Grid container spacing={1.5}>
+        {featureFamilies.map((family) => (
+          <Grid key={family.key} size={{ xs: 12, sm: 6, lg: 4 }}>
+            <Card variant="outlined" sx={{ height: '100%' }}><CardContent sx={{ '&:last-child': { pb: 2 } }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{family.label}</Typography>
+              <Typography variant="caption" color="text.secondary">{family.requirement}</Typography>
+              <Typography variant="overline" sx={{ mt: 1, display: 'block' }}>Security signals</Typography>
+              <Typography variant="caption" color="text.secondary">{family.signals.join(' · ')}</Typography>
+              <Typography variant="overline" sx={{ mt: .75, display: 'block' }}>Failure modes</Typography>
+              <Typography variant="caption" color="text.secondary">{family.failureModes.join(' · ')}</Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: .75, mt: 1.25 }}>
+                {family.values ? Object.entries(family.values).map(([name, value]) => value === null ? null : (
+                  <Chip key={name} size="small" variant="outlined" label={`${name.replace(/_/g, ' ')}: ${String(value)}`} />
+                )) : <Typography variant="caption" color="text.secondary">Feature values appear when the live stream consumes an event.</Typography>}
+              </Box>
+            </CardContent></Card>
+          </Grid>
+        ))}
+      </Grid>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
+        Payload features contain shape and detection summaries only; raw arguments are not duplicated into the feature map.
+      </Typography>
+    </Paper>
 
     <Paper sx={{ p: 2, mb: 3 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 2, flexWrap: 'wrap' }}>
@@ -195,8 +519,14 @@ const Dashboard: React.FC = () => {
             <Typography sx={{ fontWeight: 600 }}>
               {event.agent_name}
               <Typography component="span" variant="caption" color="text.secondary"> · {event.tool_name || event.method}</Typography>
+              {event.synthetic_demo && <Chip size="small" color="secondary" label="DEMO" sx={{ ml: 1, height: 20 }} />}
             </Typography>
             <Typography variant="caption" color="text.secondary">{event.decision_reason || 'No policy reason reported'}</Typography>
+            {event.ml_anomaly && <Typography variant="caption" color="warning.main" sx={{ display: 'block' }}>
+              Behavioral deviation: {event.behavioral_explanation?.length
+                ? event.behavioral_explanation.map((item) => `${item.feature} (${item.observed_z_score > 0 ? '+' : ''}${item.observed_z_score}σ)`).join(' · ')
+                : 'outside learned baseline'} · held out from training
+            </Typography>}
           </Box>
           <Typography variant="caption" color="text.secondary" sx={{ minWidth: 150 }}>
             ML {event.ml_score === null ? 'n/a' : `${(event.ml_score * 100).toFixed(1)}%`} · Rule {event.rule_risk_score === null ? 'n/a' : `${(event.rule_risk_score * 100).toFixed(1)}%`}

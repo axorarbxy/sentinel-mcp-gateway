@@ -474,6 +474,9 @@ async def run_event_consumer(
                             # will be acked on reclaim, while a failed owner can expire.
                             continue
                         try:
+                            from event_features import add_observable_features
+
+                            await add_observable_features(state, event, envelope, entry_id)
                             await handler(event)
                             for correlation in await correlate_security_event(state, event):
                                 await handler(correlation)

@@ -55,6 +55,7 @@ class BehavioralMonitor:
         # Statistics
         self.total_requests = 0
         self.anomalies_detected = 0
+        self.learning_quarantined = 0
         
         logger.info("🧠 Behavioral Monitor initialized with Isolation Forest")
     
@@ -137,6 +138,40 @@ class BehavioralMonitor:
         # This is added separately during training
             
         return np.array(features)
+
+    @staticmethod
+    def feature_names() -> List[str]:
+        """Names aligned with extract_features and the two appended context features."""
+        return [
+            "hour_of_day", "day_of_week",
+            *[f"method:{name}" for name in (
+                "tools/call", "tools/list", "resources/read", "resources/list",
+                "prompts/get", "prompts/list", "initialize", "notifications/initialized",
+            )],
+            *[f"operation:{name}" for name in (
+                "filesystem/read", "filesystem/write", "filesystem/delete",
+                "shell/execute", "shell/command", "db/query", "db/insert",
+                "db/update", "db/delete", "network/request", "network/get", "network/post",
+            )],
+            "parameter_count", "argument_bytes", "argument_depth", "argument_keys",
+            "argument_string_bytes", "path_depth", "path_traversal", "command_words",
+            "command_length", "sql_words", "sql_mutation_keyword", "new_tool",
+            "prior_tool_use_rate", "seconds_since_previous_request",
+        ]
+
+    def explain_anomaly(self, agent_id: str, features: np.ndarray, limit: int = 4) -> List[Dict[str, Any]]:
+        """Report baseline deviations as evidence; these are not model feature importances."""
+        scaler = self.scalers.get(agent_id)
+        if scaler is None:
+            return []
+        scaled = scaler.transform([features])[0]
+        names = self.feature_names()
+        ranked = sorted(enumerate(np.abs(scaled)), key=lambda item: item[1], reverse=True)
+        return [
+            {"feature": names[index], "observed_z_score": round(float(scaled[index]), 3)}
+            for index, magnitude in ranked[:limit]
+            if magnitude >= 1.0
+        ]
     
     def get_frequency_feature(self, agent_id: str) -> float:
         """Calculate time since last request for this agent"""
@@ -182,22 +217,37 @@ class BehavioralMonitor:
             is_anomaly = self.detect_anomaly(agent_id, features)
             if is_anomaly:
                 self.anomalies_detected += 1
+                raw_score = float(self.models[agent_id].score_samples(
+                    self.scalers[agent_id].transform([features])
+                )[0])
                 alert = {
                     "timestamp": datetime.now().isoformat(),
                     "agent_id": agent_id,
-                    "request": request,
+                    "request": {
+                        "timestamp": request.get("timestamp"),
+                        "method": request.get("method"),
+                        "tool_name": request.get("tool_name"),
+                    },
                     "type": "behavioral_anomaly",
-                    "score": float(self.models[agent_id].score_samples([features])[0]) if agent_id in self.models else None
+                    "score": raw_score,
+                    "score_type": "isolation_forest_raw_score",
+                    "model_version": "behavioral-isolation-forest-v1",
+                    "explanation": self.explain_anomaly(agent_id, features),
+                    "learning_status": "quarantined",
                 }
                 self.alerts.append(alert)
                 logger.warning(f"🚨 ANOMALY DETECTED for agent {agent_id}: {request.get('method')}")
                 anomaly_alert = alert
         
-        if decision == "allow":
+        # Never let a model-flagged sample teach its own baseline. Deterministic
+        # policy decisions remain authoritative; this only controls ML learning.
+        if decision == "allow" and anomaly_alert is None:
             self.feature_history[agent_id].append(features)
             self.total_allowed_samples[agent_id] += 1
             if tool_name:
                 self.allowed_tool_counts[agent_id][tool_name] += 1
+        elif anomaly_alert is not None:
+            self.learning_quarantined += 1
 
         # Refit from the bounded recent history to adapt to gradual workload
         # changes. The cumulative count still advances when the deque is full.
@@ -283,6 +333,10 @@ class BehavioralMonitor:
             "total_requests": self.total_requests,
             "anomalies_detected": self.anomalies_detected,
             "agents_monitored": len(self.models),
+            "agents_with_baseline": len(self.feature_history),
+            "training_samples": sum(len(samples) for samples in self.feature_history.values()),
+            "learning_quarantined": self.learning_quarantined,
+            "learning_policy": "allow-only; model anomalies quarantined from training",
             "total_alerts": len(self.alerts),
             "recent_alerts": self.alerts[-10:] if self.alerts else []
         }

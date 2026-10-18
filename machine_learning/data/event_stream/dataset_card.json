@@ -1,0 +1,30 @@
+{
+  "title": "Sentinel synthetic multi-tenant event-stream security dataset",
+  "synthetic": true,
+  "seed": "caller-specified; default 42",
+  "events": 12000,
+  "traces": 1005,
+  "classes": {
+    "benign": 11617,
+    "schema_drift": 60,
+    "cross_tenant_publish": 60,
+    "authorization_scope_misuse": 77,
+    "replay_duplicate": 81,
+    "broker_backpressure": 51,
+    "downstream_privilege_pivot": 54
+  },
+  "families": [
+    "identity",
+    "topics_and_schema",
+    "timing_and_ordering",
+    "payload_summary",
+    "graph_and_downstream_effects",
+    "broker_state",
+    "authorization"
+  ],
+  "limitations": [
+    "Generated from authored scenario distributions; not a measurement of real production prevalence.",
+    "Use trace-grouped splits and calibrate on the target broker and policy configuration.",
+    "No raw payload content, credentials, or personal data are generated."
+  ]
+}

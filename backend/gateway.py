@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from typing import Set
 import asyncio
+import hashlib
 import uvicorn
 import json
 import logging
@@ -41,6 +42,7 @@ from auth import decode_token, hash_api_key, parse_agent_api_key, verify_api_key
 import mcp_interception
 from shell_policy_hook import install as install_shell_policy_hook
 from shared_state import (
+    InMemorySharedState,
     SharedStateUnavailable,
     close_shared_state,
     configure_shared_state,
@@ -48,6 +50,7 @@ from shared_state import (
 )
 from event_pipeline import (
     EVENT_CONSUMER_GROUP,
+    correlate_security_event,
     open_broker_message,
     protect_broker_message,
     run_event_consumer,
@@ -1143,7 +1146,7 @@ async def mcp_proxy(request: Request):
             for key, value in (event_arguments.items() if isinstance(event_arguments, dict) else [])
             if key in {"path", "command", "sql"}
         }
-        behavioral_anomaly, _ = behavioral_monitor.add_request(
+        behavioral_anomaly, behavioral_alert = behavioral_monitor.add_request(
             str(agent_info["agent_id"]),
             {
                 "timestamp": event["timestamp"],
@@ -1156,6 +1159,12 @@ async def mcp_proxy(request: Request):
         )
         safe_event["data"]["ml_anomaly"] = behavioral_anomaly
         if behavioral_anomaly:
+            if behavioral_alert:
+                safe_event["data"]["behavioral_score"] = behavioral_alert.get("score")
+                safe_event["data"]["behavioral_score_type"] = behavioral_alert.get("score_type")
+                safe_event["data"]["behavioral_model_version"] = behavioral_alert.get("model_version")
+                safe_event["data"]["behavioral_explanation"] = behavioral_alert.get("explanation", [])
+                safe_event["data"]["learning_status"] = behavioral_alert.get("learning_status")
             from database import MCPRequestEvent, SessionLocal
 
             db = SessionLocal()
@@ -1166,6 +1175,12 @@ async def mcp_proxy(request: Request):
                 if persisted_event is not None:
                     persisted_payload = json.loads(persisted_event.payload_json)
                     persisted_payload["behavioral_anomaly"] = True
+                    if behavioral_alert:
+                        persisted_payload["behavioral_score"] = behavioral_alert.get("score")
+                        persisted_payload["behavioral_score_type"] = behavioral_alert.get("score_type")
+                        persisted_payload["behavioral_model_version"] = behavioral_alert.get("model_version")
+                        persisted_payload["behavioral_explanation"] = behavioral_alert.get("explanation", [])
+                        persisted_payload["learning_status"] = behavioral_alert.get("learning_status")
                     persisted_event.payload_json = json.dumps(persisted_payload, ensure_ascii=False)
                     db.commit()
             except Exception:
@@ -1176,6 +1191,7 @@ async def mcp_proxy(request: Request):
                 )
             finally:
                 db.close()
+            update_outbox_payload(event["event_id"], safe_event)
         payload_data = event.get("payload", {})
         sqli_analysis = payload_data.get("sqli_analysis", {}) if isinstance(payload_data, dict) else {}
         sqli_findings = sqli_analysis.get("findings", []) if isinstance(sqli_analysis, dict) else []
@@ -1482,6 +1498,162 @@ async def model_info():
         "thresholds": info["thresholds"],
         "status": "fallback" if info["fallback"] else "loaded",
     }
+
+
+@app.get("/api/ml/behavioral-monitor", tags=["Monitoring"], summary="Online behavioral model health and safe learning status")
+async def behavioral_monitor_info():
+    stats = behavioral_monitor.get_stats()
+    return {
+        **stats,
+        "online_scoring": "active" if stats["agents_monitored"] else "warming_up",
+        "federated_updates": {
+            "status": "not_configured",
+            "mode": "local_per_agent_models",
+            "reason": "Isolation Forest models are not safely weight-aggregated; no signed federated aggregator is configured.",
+        },
+        "enforcement": "deterministic policy and CEP remain authoritative",
+    }
+
+
+@app.post("/api/demo/attack-simulation", tags=["Monitoring"], summary="Broadcast a synthetic event-stream attack trace")
+async def simulate_event_stream_attack(request: Request):
+    """Exercise the real rule, online-model, CEP, and live-feed paths with ephemeral synthetic data."""
+    operator = getattr(request.state, "operator_identity", None)
+    if not operator or "gateway:write" not in set(operator.get("scopes", [])):
+        raise HTTPException(status_code=403, detail="Operator scope gateway:write required")
+    try:
+        from event_features import add_observable_features
+
+        body = await request.json()
+        scenario = body.get("scenario", "novel_sensitive_tool") if isinstance(body, dict) else "novel_sensitive_tool"
+        supported_scenarios = {"novel_sensitive_tool", "cross_agent_payload_fanout"}
+        if not isinstance(scenario, str) or scenario not in supported_scenarios:
+            raise HTTPException(status_code=422, detail="Unknown synthetic scenario")
+
+        simulation_id = f"sim-{uuid.uuid4().hex[:12]}"
+        synthetic_agent_ids = [99001] if scenario == "novel_sensitive_tool" else [99011, 99012, 99013]
+        now = datetime.now(timezone.utc)
+        isolation_monitor = BehavioralMonitor(window_size=100, contamination=0.05)
+        isolated_cep_state = InMemorySharedState()
+        baseline_tool = "catalog.search"
+        # Give every synthetic identity its own clean, repetitive baseline.
+        for synthetic_agent_id in synthetic_agent_ids:
+            for index in range(36):
+                sample_time = now - timedelta(hours=2) + timedelta(minutes=index)
+                isolation_monitor.add_request(str(synthetic_agent_id), {
+                    "timestamp": sample_time.isoformat(),
+                    "method": "tools/call",
+                    "params": {},
+                    "tool_name": baseline_tool,
+                    "decision": "allow",
+                    **_argument_shape({"query": "latest"}),
+                })
+
+        detections = []
+        cep_findings = []
+        for index in range(3):
+            event_id = f"{simulation_id}-{index + 1}"
+            synthetic_agent_id = synthetic_agent_ids[index] if scenario == "cross_agent_payload_fanout" else synthetic_agent_ids[0]
+            # Both scenarios introduce the same previously unseen sensitive tool;
+            # fan-out then adds a distinct cross-agent CEP signal over its payload.
+            tool_name = "filesystem/write"
+            # Benign values and shape changes; no exploit strings or upstream call.
+            arguments = {f"batch_{key}": {"items": ["sample"] * 12} for key in range(24)}
+            timestamp = (now - timedelta(seconds=3 - index)).isoformat().replace("+00:00", "Z")
+            shape = _argument_shape(arguments)
+            anomaly, alert = isolation_monitor.add_request(str(synthetic_agent_id), {
+                "timestamp": timestamp,
+                "method": "tools/call",
+                "params": {},
+                "tool_name": tool_name,
+                "decision": "allow",
+                **shape,
+            })
+            policy_result = policy_engine.evaluate("tools/call", {"name": tool_name, "arguments": arguments})
+            policy_rule_hits = [item["rule"] for item in policy_result.details if not item["allowed"]]
+            data = {
+                "schema_version": "1.0",
+                "event_id": event_id,
+                "timestamp": timestamp,
+                "agent_id": synthetic_agent_id,
+                "agent_name": "Synthetic agent · attack lab",
+                "environment": "demo",
+                "direction": "agent_to_server",
+                "method": "tools/call",
+                "tool_name": tool_name,
+                "arguments": arguments,
+                "decision": "block" if not policy_result.allowed else "allow",
+                "decision_reason": policy_result.reason,
+                "matched_rule_ids": policy_rule_hits,
+                "decision_source": "rule",
+                "rule_risk_score": 0.0,
+                "latency_ms": 1.0,
+                "ml_anomaly": anomaly,
+                "behavioral_score": alert.get("score") if alert else None,
+                "behavioral_score_type": alert.get("score_type") if alert else None,
+                "behavioral_model_version": alert.get("model_version") if alert else "behavioral-isolation-forest-v1",
+                "behavioral_explanation": alert.get("explanation", []) if alert else [],
+                "learning_status": "quarantined · demo model discarded after run",
+                "synthetic_demo": True,
+                "simulation_id": simulation_id,
+                "scenario": scenario,
+                "payload_hash": hashlib.sha256(json.dumps(arguments, sort_keys=True).encode()).hexdigest(),
+            }
+            event = {"type": "mcp_event", "data": data}
+            envelope = {
+                "event_id": event_id,
+                "event_type": "mcp_event",
+                "occurred_at": timestamp,
+                "agent_id": synthetic_agent_id,
+                "topic": "synthetic.attack.lab",
+                "producer_id": "sentinel-synthetic-demo",
+                "attempts": 1,
+            }
+            await add_observable_features(isolated_cep_state, event, envelope, f"demo-{index}")
+            correlations = await correlate_security_event(isolated_cep_state, event)
+            for correlation in correlations:
+                correlation["data"]["synthetic_demo"] = True
+                correlation["data"]["simulation_id"] = simulation_id
+                cep_findings.append(correlation["data"])
+                await traffic_broadcaster.broadcast(correlation)
+            detections.append({
+                "event_id": event_id,
+                "policy_decision": data["decision"],
+                "policy_matched_rules": policy_rule_hits,
+                "ml_detected": anomaly,
+                "ml_explanation": data["behavioral_explanation"],
+                "cep_findings": [finding["matched_rule_ids"][0] for finding in correlations],
+            })
+            await traffic_broadcaster.broadcast(event)
+
+        return {
+            "simulation_id": simulation_id,
+            "scenario": "Novel sensitive-tool behavior" if scenario == "novel_sensitive_tool" else "Cross-agent suspicious payload fan-out",
+            "synthetic": True,
+            "upstream_calls": 0,
+            "persisted_events": 0,
+            "events_broadcast": len(detections),
+            "static_policy_decision": detections[0]["policy_decision"] if detections else "unknown",
+            "static_policy_miss": bool(detections)
+            and all(item["policy_decision"] == "allow" for item in detections)
+            and any(item["ml_detected"] or item["cep_findings"] for item in detections),
+            "static_policy_summary": (
+                "The deterministic evaluator allowed the policy-approved filesystem/write call; online anomaly scoring and CEP identified its unusual agent-level behavior."
+                if scenario == "novel_sensitive_tool"
+                else "The deterministic evaluator allowed the individually valid requests; CEP detected the same suspicious payload fingerprint across independent agents."
+            ),
+            "ml_detected_events": sum(item["ml_detected"] for item in detections),
+            "cep_findings": [
+                {"rule_id": finding["matched_rule_ids"][0], "summary": finding["decision_reason"]}
+                for finding in cep_findings
+            ],
+            "events": detections,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Synthetic event-stream demo failed")
+        raise HTTPException(status_code=500, detail="Synthetic event-stream simulation failed") from exc
 
 
 @app.put("/api/ml/thresholds", tags=["Monitoring"], summary="Adjust the ML decision thresholds")

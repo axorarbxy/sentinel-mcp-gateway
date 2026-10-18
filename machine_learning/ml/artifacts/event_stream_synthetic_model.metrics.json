@@ -1,0 +1,231 @@
+{
+  "model_type": "RandomForestClassifier",
+  "training_scope": "synthetic_event_stream_benchmark_only",
+  "input_path": "R:\\sentinel-mcp-gateway\\machine_learning\\data\\event_stream\\synthetic_event_stream.csv",
+  "model_path": "R:\\sentinel-mcp-gateway\\machine_learning\\ml\\artifacts\\event_stream_synthetic_model.joblib",
+  "seed": 42,
+  "total_events": 12000,
+  "train_events": 8953,
+  "test_events": 3047,
+  "train_traces": 753,
+  "test_traces": 252,
+  "classes": [
+    "authorization_scope_misuse",
+    "benign",
+    "broker_backpressure",
+    "cross_tenant_publish",
+    "downstream_privilege_pivot",
+    "replay_duplicate",
+    "schema_drift"
+  ],
+  "macro_f1": 1.0,
+  "classification_report": {
+    "authorization_scope_misuse": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 19.0
+    },
+    "benign": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 2951.0
+    },
+    "broker_backpressure": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 13.0
+    },
+    "cross_tenant_publish": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 17.0
+    },
+    "downstream_privilege_pivot": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 11.0
+    },
+    "replay_duplicate": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 23.0
+    },
+    "schema_drift": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 13.0
+    },
+    "accuracy": 1.0,
+    "macro avg": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 3047.0
+    },
+    "weighted avg": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 3047.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      19,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      2951,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      13,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      17,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      11,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      23,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      13
+    ]
+  ],
+  "top_signals": [
+    {
+      "feature": "categorical__downstream_effect_normal_order_processing",
+      "importance": 0.062867
+    },
+    {
+      "feature": "categorical__downstream_effect_privileged_export_or_deploy",
+      "importance": 0.05941
+    },
+    {
+      "feature": "categorical__downstream_effect_cross_tenant_data_visible",
+      "importance": 0.05017
+    },
+    {
+      "feature": "numeric__graph_fanout_5m",
+      "importance": 0.049861
+    },
+    {
+      "feature": "numeric__graph_edge_novel",
+      "importance": 0.049429
+    },
+    {
+      "feature": "numeric__cross_tenant_route",
+      "importance": 0.037765
+    },
+    {
+      "feature": "numeric__inter_arrival_ms",
+      "importance": 0.037364
+    },
+    {
+      "feature": "categorical__authorization_decision_allow_scope_mismatch",
+      "importance": 0.037262
+    },
+    {
+      "feature": "numeric__identity_tenant_mismatch",
+      "importance": 0.036378
+    },
+    {
+      "feature": "categorical__downstream_effect_unauthorized_admin_action",
+      "importance": 0.03578
+    },
+    {
+      "feature": "numeric__required_scope_present",
+      "importance": 0.035547
+    },
+    {
+      "feature": "numeric__payload_bytes",
+      "importance": 0.031218
+    },
+    {
+      "feature": "numeric__payload_hash_reuse_count",
+      "importance": 0.030971
+    },
+    {
+      "feature": "numeric__event_age_ms",
+      "importance": 0.030264
+    },
+    {
+      "feature": "categorical__downstream_effect_delayed_or_reordered_effect",
+      "importance": 0.029896
+    },
+    {
+      "feature": "categorical__authorization_decision_allow",
+      "importance": 0.028754
+    },
+    {
+      "feature": "numeric__consumer_lag",
+      "importance": 0.028454
+    },
+    {
+      "feature": "categorical__schema_version_v1",
+      "importance": 0.027264
+    },
+    {
+      "feature": "numeric__schema_drift_score",
+      "importance": 0.027173
+    },
+    {
+      "feature": "categorical__broker_status_backlogged",
+      "importance": 0.026892
+    }
+  ],
+  "limitations": [
+    "Synthetic distributions are authored scenarios and do not measure real attack prevalence.",
+    "Trace groups are held out, but validation on real broker telemetry is still required.",
+    "This artifact is not loaded by the gateway and does not make enforcement decisions."
+  ]
+}

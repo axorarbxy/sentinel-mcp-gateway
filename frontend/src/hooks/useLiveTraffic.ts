@@ -20,9 +20,28 @@ export interface TrafficEvent {
   allowed: boolean;
   reason: string;
   ml_anomaly: boolean;
+  behavioral_score?: number;
+  behavioral_explanation?: { feature: string; observed_z_score: number }[];
+  behavioral_model_version?: string;
+  learning_status?: string;
+  synthetic_demo?: boolean;
+  scenario?: string;
   total_requests?: number;
   total_blocked?: number;
   total_anomalies?: number;
+  severity?: string;
+  correlation_window_seconds?: number;
+  trigger_event_id?: string;
+  observable_features?: ObservableFeatureFamilies;
+}
+
+export interface ObservableFeatureFamilies {
+  identity?: Record<string, string | number | boolean | null>;
+  topics?: Record<string, string | number | boolean | null>;
+  timing?: Record<string, string | number | boolean | null>;
+  payload_summary?: Record<string, string | number | boolean | null>;
+  graph_structure?: Record<string, string | number | boolean | null>;
+  broker_state?: Record<string, string | number | boolean | null>;
 }
 
 const normalizeTrafficEvent = (value: unknown): TrafficEvent | null => {
@@ -80,6 +99,29 @@ const normalizeTrafficEvent = (value: unknown): TrafficEvent | null => {
     allowed: decision !== 'block',
     reason,
     ml_anomaly: raw.ml_anomaly === true || eventPayload.behavioral_anomaly === true,
+    behavioral_score: typeof raw.behavioral_score === 'number'
+      ? raw.behavioral_score
+      : typeof eventPayload.behavioral_score === 'number' ? eventPayload.behavioral_score : undefined,
+    behavioral_explanation: Array.isArray(raw.behavioral_explanation)
+      ? raw.behavioral_explanation as { feature: string; observed_z_score: number }[]
+      : Array.isArray(eventPayload.behavioral_explanation)
+        ? eventPayload.behavioral_explanation as { feature: string; observed_z_score: number }[] : undefined,
+    behavioral_model_version: typeof raw.behavioral_model_version === 'string'
+      ? raw.behavioral_model_version
+      : typeof eventPayload.behavioral_model_version === 'string' ? eventPayload.behavioral_model_version : undefined,
+    learning_status: typeof raw.learning_status === 'string'
+      ? raw.learning_status
+      : typeof eventPayload.learning_status === 'string' ? eventPayload.learning_status : undefined,
+    synthetic_demo: raw.synthetic_demo === true || eventPayload.synthetic_demo === true,
+    scenario: typeof raw.scenario === 'string'
+      ? raw.scenario
+      : typeof eventPayload.scenario === 'string' ? eventPayload.scenario : undefined,
+    severity: typeof raw.severity === 'string' ? raw.severity : undefined,
+    correlation_window_seconds: typeof raw.correlation_window_seconds === 'number' ? raw.correlation_window_seconds : undefined,
+    trigger_event_id: typeof raw.trigger_event_id === 'string' ? raw.trigger_event_id : undefined,
+    observable_features: raw.observable_features && typeof raw.observable_features === 'object'
+      ? raw.observable_features as ObservableFeatureFamilies
+      : undefined,
   };
 };
 
