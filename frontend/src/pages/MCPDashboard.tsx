@@ -52,7 +52,7 @@ import {
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from 'recharts';
 import useLiveTraffic from '../hooks/useLiveTraffic';
 
-const API_URL = 'http://localhost:8001';
+import { API_BASE_URL as API_URL } from '../services/urls';
 
 const getAuthHeaders = (extra: Record<string, string> = {}) => {
   const token = localStorage.getItem('access_token');

@@ -9,10 +9,33 @@ const InsiderModule: React.FC = () => {
     try {
       userData = JSON.parse(input);
     } catch {
+      // Also accept readable, labeled activity summaries (User:, Action:,
+      // Result:, Location:) so safe prose is not automatically marked suspicious.
+      const fields: Record<string, string> = {};
+      input.split(/\r?\n/).forEach(line => {
+        const match = line.match(/^\s*([\w ]+)\s*:\s*(.+)\s*$/);
+        if (match) fields[match[1].trim().toLowerCase()] = match[2].trim();
+      });
+      const action = fields.action || input.trim();
+      const result = fields.result || '';
+      const combined = `${action} ${result}`;
+      const recordMatch = combined.match(/([\d,]+)\s*(?:customer\s+)?records?/i);
+      const sizeMatch = combined.match(/([\d.]+)\s*(gb|mb)\b/i);
+      const location = fields.location || '';
       userData = {
-        user_id: input || 'unknown',
+        user_id: fields.user || fields.username || 'demo-user',
         timestamp: new Date().toISOString(),
-        flags: ['suspicious_activity'],
+        local_hour: new Date().getHours(),
+        local_weekday: new Date().getDay() === 0 ? 6 : new Date().getDay() - 1,
+        action,
+        resource: fields.resource || '',
+        result,
+        location,
+        ...(recordMatch ? { records_count: Number(recordMatch[1].replace(/,/g, '')) } : {}),
+        ...(sizeMatch ? { data_size: Number(sizeMatch[1]) * (sizeMatch[2].toLowerCase() === 'gb' ? 1024 : 1) } : {}),
+        unfamiliar_location: /unfamiliar|unknown|foreign/i.test(location),
+        external_transfer: /external transfer|uploaded externally|sent to external/i.test(combined),
+        flags: [],
       };
     }
 

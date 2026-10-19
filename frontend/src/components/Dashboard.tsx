@@ -6,6 +6,7 @@ import { gatewayApi, gatewayFetch } from '../services/api';
 import { LogEntry, StatsResponse } from '../types';
 import useLiveTraffic, { ObservableFeatureFamilies, TrafficEvent } from '../hooks/useLiveTraffic';
 import ExtensionBanner from './ExtensionBanner';
+import { API_BASE_URL as API_URL } from '../services/urls';
 
 const DETECTION_CATEGORIES = [
   { name: 'SQL injection', color: '#ef5350' },
@@ -16,7 +17,6 @@ const DETECTION_CATEGORIES = [
   { name: 'Behavioral anomalies', color: '#ec407a' },
   { name: 'Other gateway rules', color: '#78909c' },
 ];
-const API_URL = 'http://localhost:8001';
 const chartTooltipStyle = { backgroundColor: '#101822', border: '1px solid rgba(154,175,193,.2)', borderRadius: 10, color: '#F3F7FA' };
 
 interface MCPOverview {
@@ -283,54 +283,76 @@ const Dashboard: React.FC = () => {
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Tooltip title="Refresh data"><IconButton onClick={fetchData}><RefreshIcon /></IconButton></Tooltip><Chip icon={<HubIcon />} label={connected ? `LIVE · last event ${formatAge(lastEvent)}` : 'RECONNECTING · telemetry unavailable'} color={connected ? 'success' : 'warning'} variant="outlined" /></Box>
     </Box>
 
-    <Paper sx={{ p: 2, mb: 3, borderLeft: `4px solid ${connected ? '#4caf50' : '#ff9800'}` }}>
-      <Typography variant="overline">Protection status</Typography><Typography variant="h6">{connected ? 'Telemetry connected' : 'Telemetry connection unavailable'}</Typography>
-      <Typography variant="body2" color="text.secondary">{connected ? `WebSocket connected. Last event ${formatAge(lastEvent)}.` : 'REST data may still be available; live event updates will resume when the gateway reconnects.'}</Typography>
+    <Paper sx={{ p: { xs: 2, sm: 2.5 }, mb: 3, borderLeft: `4px solid ${connected ? '#4caf50' : '#ff9800'}`, background: 'linear-gradient(110deg, rgba(76,175,80,.08), rgba(16,24,34,.96) 34%)' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+        <Box>
+          <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 1.2 }}>Protection status</Typography>
+          <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.3 }}>{connected ? 'Telemetry connected' : 'Telemetry connection unavailable'}</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: .4 }}>{connected ? `WebSocket connected · Last event ${formatAge(lastEvent)}` : 'REST data is available; live event updates will resume when the gateway reconnects.'}</Typography>
+        </Box>
+        <Chip icon={<HubIcon />} label={connected ? 'LIVE STREAM' : 'RECONNECTING'} color={connected ? 'success' : 'warning'} variant="outlined" />
+      </Box>
     </Paper>
 
-    <Paper sx={{ p: 2.5, mb: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap' }}>
+    <Paper sx={{ p: { xs: 2, sm: 3 }, mb: 3, overflow: 'hidden', background: 'linear-gradient(145deg, rgba(17,27,39,.98), rgba(13,21,31,.98))' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap', mb: 2 }}>
         <Box>
-          <Typography variant="h6">Online model governance</Typography>
-          <Typography variant="caption" color="text.secondary">Anomalies are scored against each agent’s learned baseline and explained with the strongest feature deviations.</Typography>
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>Online model governance</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: .5, maxWidth: 760 }}>Each agent is scored against its own learned baseline, with the strongest feature deviations shown for review.</Typography>
         </Box>
-        <Chip size="small" label={behavioralStatus?.online_scoring === 'active' ? 'ONLINE SCORING' : 'MODEL WARMING UP'} color={behavioralStatus?.online_scoring === 'active' ? 'success' : 'default'} variant="outlined" />
+        <Chip size="small" label={behavioralStatus?.online_scoring === 'active' ? 'ONLINE SCORING' : 'MODEL WARMING UP'} color={behavioralStatus?.online_scoring === 'active' ? 'success' : 'default'} variant="outlined" sx={{ fontWeight: 700, letterSpacing: .4 }} />
       </Box>
-      <Grid container spacing={2} sx={{ mt: .5 }}>
-        <Grid size={{ xs: 12, sm: 4 }}><Typography variant="overline" color="text.secondary">Trained agents</Typography><Typography variant="h5">{behavioralStatus?.agents_monitored ?? 0}</Typography></Grid>
-        <Grid size={{ xs: 12, sm: 4 }}><Typography variant="overline" color="text.secondary">Clean baseline samples</Typography><Typography variant="h5">{behavioralStatus?.training_samples ?? 0}</Typography></Grid>
-        <Grid size={{ xs: 12, sm: 4 }}><Typography variant="overline" color="text.secondary">Anomalies held out of learning</Typography><Typography variant="h5">{behavioralStatus?.learning_quarantined ?? 0}</Typography></Grid>
+      <Grid container spacing={1.5}>
+        {[
+          { label: 'Trained agents', value: behavioralStatus?.agents_monitored ?? 0, hint: 'Individual behavior baselines' },
+          { label: 'Clean baseline samples', value: behavioralStatus?.training_samples ?? 0, hint: 'Accepted for model learning' },
+          { label: 'Anomalies quarantined', value: behavioralStatus?.learning_quarantined ?? 0, hint: 'Excluded from training data' },
+        ].map((metric) => <Grid key={metric.label} size={{ xs: 12, sm: 4 }}>
+          <Box sx={{ height: '100%', p: 1.75, borderRadius: 2.5, bgcolor: 'rgba(5,12,20,.42)', border: '1px solid rgba(154,175,193,.1)' }}>
+            <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: .8 }}>{metric.label}</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 750, lineHeight: 1.25, mt: .25 }}>{metric.value.toLocaleString()}</Typography>
+            <Typography variant="caption" color="text.secondary">{metric.hint}</Typography>
+          </Box>
+        </Grid>)}
       </Grid>
-      <Typography variant="body2" sx={{ mt: 1 }}>{behavioralStatus?.enforcement || 'Deterministic policy and CEP remain authoritative.'}</Typography>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: .5 }}>
-        Federated updates: {behavioralStatus?.federated_updates.status || 'status unavailable'} · {behavioralStatus?.federated_updates.reason || 'Signed aggregator not configured.'}
-      </Typography>
-      <Typography variant="caption" color="text.secondary">Learning gate: {behavioralStatus?.learning_policy || 'only allowed, non-anomalous events update the baseline.'}</Typography>
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, flexWrap: 'wrap', mt: 2 }}>
+        <Chip size="small" color="primary" variant="outlined" label={behavioralStatus?.enforcement || 'Deterministic policy and CEP remain authoritative'} />
+        <Chip size="small" variant="outlined" label={`Learning gate · ${behavioralStatus?.learning_policy || 'allow-only; anomalies excluded'}`} sx={{ maxWidth: '100%', '& .MuiChip-label': { whiteSpace: 'normal', py: .5 } }} />
+      </Box>
+      <Box sx={{ mt: 1.5, p: 1.5, borderRadius: 2, bgcolor: 'rgba(255,255,255,.025)', border: '1px solid rgba(154,175,193,.08)' }}>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700, mb: .35 }}>Federated updates · {behavioralStatus?.federated_updates.status || 'status unavailable'}</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', overflowWrap: 'anywhere' }}>{behavioralStatus?.federated_updates.reason || 'Signed aggregator not configured.'}</Typography>
+      </Box>
     </Paper>
 
-    <Paper sx={{ p: 2.5, mb: 3, borderLeft: '4px solid #ab47bc' }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap' }}>
+    <Paper sx={{ p: { xs: 2, sm: 3 }, mb: 3, borderLeft: '4px solid #ab47bc', background: 'linear-gradient(115deg, rgba(171,71,188,.09), rgba(16,24,34,.97) 45%)' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap', mb: 2 }}>
         <Box>
-          <Typography variant="h6">Synthetic event-stream attack lab</Typography>
-          <Typography variant="caption" color="text.secondary">A safe, ephemeral prototype: generated traces pass through the policy evaluator, online anomaly scorer, CEP correlator, and live WebSocket.</Typography>
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>Synthetic event-stream attack lab</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: .5, maxWidth: 800 }}>Explore how generated events move through policy checks, anomaly scoring, correlation, and the live stream.</Typography>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-          <FormControl size="small" sx={{ minWidth: 245 }}>
-            <InputLabel id="attack-scenario-label">Synthetic scenario</InputLabel>
-            <Select labelId="attack-scenario-label" label="Synthetic scenario" value={simulationScenario} onChange={(event) => {
-              setSimulationScenario(event.target.value as typeof simulationScenario);
-              setSimulation(null);
-            }}>
-              <MenuItem value="novel_sensitive_tool">Novel behavior on filesystem/write</MenuItem>
-              <MenuItem value="cross_agent_payload_fanout">Cross-agent payload fan-out</MenuItem>
-            </Select>
-          </FormControl>
-          <Button variant="contained" color="secondary" onClick={runAttackSimulation} disabled={simulationRunning}>
-            {simulationRunning ? 'Running simulation…' : 'Run synthetic replay'}
-          </Button>
-        </Box>
+        <Chip size="small" color="secondary" variant="outlined" label="SAFE · SYNTHETIC DATA" sx={{ fontWeight: 700, letterSpacing: .35 }} />
       </Box>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>Replays 3 synthetic requests through policy, online ML, and CEP; choose novel tool drift or suspicious cross-agent fan-out. No upstream calls or database persistence. Requires gateway:write.</Typography>
+      <Box sx={{ display: 'flex', gap: 1.25, flexWrap: 'wrap', alignItems: 'center' }}>
+        <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 290 }, maxWidth: '100%' }}>
+          <InputLabel id="attack-scenario-label">Synthetic scenario</InputLabel>
+          <Select labelId="attack-scenario-label" label="Synthetic scenario" value={simulationScenario} onChange={(event) => {
+            setSimulationScenario(event.target.value as typeof simulationScenario);
+            setSimulation(null);
+          }}>
+            <MenuItem value="novel_sensitive_tool">Novel behavior on filesystem/write</MenuItem>
+            <MenuItem value="cross_agent_payload_fanout">Cross-agent payload fan-out</MenuItem>
+          </Select>
+        </FormControl>
+        <Button variant="contained" color="secondary" onClick={runAttackSimulation} disabled={simulationRunning} sx={{ minHeight: 40, px: 2.5, width: { xs: '100%', sm: 'auto' } }}>
+          {simulationRunning ? 'Running simulation…' : 'Run synthetic replay'}
+        </Button>
+      </Box>
+      <Box sx={{ mt: 1.75, p: 1.5, borderRadius: 2, bgcolor: 'rgba(5,12,20,.4)', border: '1px solid rgba(154,175,193,.09)' }}>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.7 }}>
+          Replays three requests through policy, ML, and CEP. No upstream calls or database writes. Requires <strong>gateway:write</strong>.
+        </Typography>
+      </Box>
       {simulationRunning && <LinearProgress sx={{ mt: 1.5 }} />}
       {simulationError && <Typography color="error.main" variant="body2" sx={{ mt: 1.5 }}>{simulationError}</Typography>}
       {simulation && <Box sx={{ mt: 2 }}>
@@ -425,34 +447,70 @@ const Dashboard: React.FC = () => {
       </Box> : <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>No CEP threshold has fired in the last 5 minutes. Policy blocks and model flags continue to appear as events arrive.</Typography>}
     </Paper>
 
-    <Paper sx={{ p: 2.5, mb: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap', mb: 2 }}>
+    <Paper sx={{ p: { xs: 2, sm: 3 }, mb: 3, background: 'linear-gradient(145deg, rgba(17,27,39,.98), rgba(13,21,31,.98))' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap', mb: 2.5 }}>
         <Box>
-          <Typography variant="h6">Event security feature map</Typography>
-          <Typography variant="caption" color="text.secondary">Security requirements mapped to six observable feature families on each consumed broker event.</Typography>
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>Event security feature map</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: .35 }}>Six views of each consumed broker event help surface identity, routing, timing, payload, graph, and broker risks.</Typography>
         </Box>
-        <Chip size="small" label={`${hybridWindow.featureEvents.length} instrumented live events · 5 min`} color={hybridWindow.featureEvents.length ? 'info' : 'default'} variant="outlined" />
+        <Chip size="small" label={`${hybridWindow.featureEvents.length} live events · 5 min`} color={hybridWindow.featureEvents.length ? 'info' : 'default'} variant="outlined" sx={{ fontWeight: 700 }} />
       </Box>
-      <Grid container spacing={1.5}>
-        {featureFamilies.map((family) => (
+      <Grid container spacing={2}>
+        {featureFamilies.map((family, index) => {
+          const accentColors = ['#56E0C3', '#42A5F5', '#A99BFF', '#FFB74D', '#F06292', '#80CBC4'];
+          const accent = accentColors[index % accentColors.length];
+          const values = family.values ? Object.entries(family.values).filter(([, value]) => value !== null) : [];
+          return (
           <Grid key={family.key} size={{ xs: 12, sm: 6, lg: 4 }}>
-            <Card variant="outlined" sx={{ height: '100%' }}><CardContent sx={{ '&:last-child': { pb: 2 } }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{family.label}</Typography>
-              <Typography variant="caption" color="text.secondary">{family.requirement}</Typography>
-              <Typography variant="overline" sx={{ mt: 1, display: 'block' }}>Security signals</Typography>
-              <Typography variant="caption" color="text.secondary">{family.signals.join(' · ')}</Typography>
-              <Typography variant="overline" sx={{ mt: .75, display: 'block' }}>Failure modes</Typography>
-              <Typography variant="caption" color="text.secondary">{family.failureModes.join(' · ')}</Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: .75, mt: 1.25 }}>
-                {family.values ? Object.entries(family.values).map(([name, value]) => value === null ? null : (
-                  <Chip key={name} size="small" variant="outlined" label={`${name.replace(/_/g, ' ')}: ${String(value)}`} />
-                )) : <Typography variant="caption" color="text.secondary">Feature values appear when the live stream consumes an event.</Typography>}
-              </Box>
-            </CardContent></Card>
+            <Card variant="outlined" sx={{
+              height: '100%',
+              borderRadius: 3,
+              borderColor: 'rgba(154,175,193,.14)',
+              borderTop: `2px solid ${accent}`,
+              background: 'linear-gradient(155deg, rgba(20,32,45,.88), rgba(12,20,29,.8))',
+              transition: 'transform .18s ease, border-color .18s ease, box-shadow .18s ease',
+              '&:hover': { transform: 'translateY(-2px)', borderColor: `${accent}88`, boxShadow: `0 12px 28px ${accent}12` },
+            }}>
+              <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2.25 } }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.1, mb: .75 }}>
+                  <Box sx={{ width: 30, height: 30, display: 'grid', placeItems: 'center', borderRadius: 2, bgcolor: `${accent}1A`, color: accent, fontSize: 12, fontWeight: 800 }}>{String(index + 1).padStart(2, '0')}</Box>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 750 }}>{family.label}</Typography>
+                </Box>
+                <Typography variant="body2" color="text.secondary" sx={{ minHeight: 42, lineHeight: 1.55 }}>{family.requirement}</Typography>
+
+                <Box sx={{ mt: 1.5, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
+                  <Box sx={{ p: 1.15, borderRadius: 2, bgcolor: 'rgba(86,224,195,.055)', border: '1px solid rgba(86,224,195,.11)' }}>
+                    <Typography variant="overline" sx={{ color: 'primary.light', fontSize: 9, lineHeight: 1.4, letterSpacing: 1 }}>Signals</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: .25, lineHeight: 1.55 }}>{family.signals.join(' · ')}</Typography>
+                  </Box>
+                  <Box sx={{ p: 1.15, borderRadius: 2, bgcolor: 'rgba(255,183,77,.045)', border: '1px solid rgba(255,183,77,.10)' }}>
+                    <Typography variant="overline" sx={{ color: '#FFCC80', fontSize: 9, lineHeight: 1.4, letterSpacing: 1 }}>Risks</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: .25, lineHeight: 1.55 }}>{family.failureModes.join(' · ')}</Typography>
+                  </Box>
+                </Box>
+
+                <Divider sx={{ my: 1.5, borderColor: 'rgba(154,175,193,.1)' }} />
+                {values.length ? (
+                  <Grid container spacing={.75}>
+                    {values.map(([name, value]) => (
+                      <Grid key={name} size={{ xs: 6 }}>
+                        <Box sx={{ minWidth: 0, height: '100%', px: 1, py: .75, borderRadius: 1.5, bgcolor: 'rgba(5,12,20,.45)' }}>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textTransform: 'capitalize', fontSize: 10, lineHeight: 1.35 }}>{name.replace(/_/g, ' ')}</Typography>
+                          <Typography variant="body2" sx={{ mt: .2, color: 'text.primary', fontWeight: 650, fontSize: 12, overflowWrap: 'anywhere', lineHeight: 1.4 }}>{String(value)}</Typography>
+                        </Box>
+                      </Grid>
+                    ))}
+                  </Grid>
+                ) : (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', py: .5 }}>Live values will appear when the stream consumes an event.</Typography>
+                )}
+              </CardContent>
+            </Card>
           </Grid>
-        ))}
+          );
+        })}
       </Grid>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
         Payload features contain shape and detection summaries only; raw arguments are not duplicated into the feature map.
       </Typography>
     </Paper>

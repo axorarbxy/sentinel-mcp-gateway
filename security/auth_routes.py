@@ -5,6 +5,7 @@ Authentication Routes
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Security
 from fastapi.security import OAuth2PasswordBearer, SecurityScopes
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
 from typing import Optional
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -22,7 +23,7 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 
 # Pydantic Models
 class UserCreate(BaseModel):
-    username: str = Field(..., min_length=3, max_length=50)
+    username: str = Field(..., min_length=3, max_length=20)
     email: EmailStr
     password: str = Field(..., min_length=8)
     full_name: Optional[str] = None
@@ -95,28 +96,40 @@ async def require_scopes(
 @router.post("/register", response_model=UserResponse)
 async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     """Register a new user"""
-    
-    # Check if username exists
-    existing_user = db.query(User).filter(User.username == user_data.username).first()
+
+    # Treat usernames and email addresses as case-insensitive identities.
+    username = user_data.username.strip().lower()
+    email = str(user_data.email).strip().lower()
+
+    existing_user = db.query(User).filter(User.username.ilike(username)).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already taken")
-    
-    # Check if email exists
-    existing_email = db.query(User).filter(User.email == user_data.email).first()
+
+    existing_email = db.query(User).filter(User.email.ilike(email)).first()
     if existing_email:
         raise HTTPException(status_code=400, detail="Email already registered")
-    
+
     # Create user
     hashed_password = get_password_hash(user_data.password)
     db_user = User(
-        username=user_data.username,
-        email=user_data.email,
+        username=username,
+        email=email,
         hashed_password=hashed_password,
         full_name=user_data.full_name,
         is_admin=is_demo_environment(),
     )
     db.add(db_user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # The unique database constraints close the race between the checks
+        # above and simultaneous registration requests.
+        db.rollback()
+        if db.query(User).filter(User.username.ilike(username)).first():
+            raise HTTPException(status_code=400, detail="Username already taken")
+        if db.query(User).filter(User.email.ilike(email)).first():
+            raise HTTPException(status_code=400, detail="Email already registered")
+        raise HTTPException(status_code=400, detail="Username or email already registered")
     db.refresh(db_user)
     
     # Log registration
@@ -139,9 +152,10 @@ async def login(
     """Login user and return tokens"""
     
     # Find user by username or email
+    login_identity = login_data.username_or_email.strip().lower()
     user = db.query(User).filter(
-        (User.username == login_data.username_or_email) |
-        (User.email == login_data.username_or_email)
+        (User.username.ilike(login_identity)) |
+        (User.email.ilike(login_identity))
     ).first()
     
     if not user:

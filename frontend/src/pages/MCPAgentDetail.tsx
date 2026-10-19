@@ -53,7 +53,7 @@ import {
 import { useParams, useNavigate } from 'react-router-dom';
 import useLiveTraffic, { TrafficEvent } from '../hooks/useLiveTraffic';
 
-const API_URL = 'http://localhost:8001';
+import { API_BASE_URL as API_URL } from '../services/urls';
 
 // ============ TYPES ============
 interface MCPAgent {
@@ -66,7 +66,7 @@ interface MCPAgent {
   environment: string;
   team: string | null;
   risk_level: string;
-  policies: number[];
+  allowed_tools: string[];
   is_active: boolean;
   total_requests: number;
   blocked_requests: number;
@@ -105,7 +105,14 @@ const MCPAgentDetail: React.FC = () => {
       ]);
 
       if (agentRes.ok) {
-        setAgent({ ...(await agentRes.json()), api_key: '<one-time-agent-key>' });
+        const data = await agentRes.json();
+        setAgent({
+          ...data,
+          api_key: '<one-time-agent-key>',
+          allowed_tools: Array.isArray(data.allowed_tools) ? data.allowed_tools : [],
+          total_requests: Number.isFinite(data.total_requests) ? data.total_requests : 0,
+          blocked_requests: Number.isFinite(data.blocked_requests) ? data.blocked_requests : 0,
+        });
       } else if (agentRes.status === 404) {
         showSnackbar('Agent not found', 'error');
         setTimeout(() => navigate('/mcp'), 2000);
@@ -195,7 +202,7 @@ const MCPAgentDetail: React.FC = () => {
   const allowedRequests = agent ? agent.total_requests - agent.blocked_requests : 0;
 
   // cURL command generator
-  const curlCommand = agent ? `curl -X POST http://localhost:8001/mcp/proxy \\
+  const curlCommand = agent ? `curl -X POST ${API_URL || window.location.origin}/mcp/proxy \\
   -H "Authorization: Bearer ${agent.api_key}" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -209,7 +216,7 @@ const MCPAgentDetail: React.FC = () => {
   const pythonCode = agent ? `import httpx
 
 response = httpx.post(
-    "http://localhost:8001/mcp/proxy",
+    "${API_URL || window.location.origin}/mcp/proxy",
     headers={
         "Authorization": "Bearer ${agent.api_key}",
         "Content-Type": "application/json",
@@ -387,14 +394,14 @@ print(response.json())` : '';
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                 <SecurityIcon sx={{ color: '#ff9800' }} />
                 <Typography variant="caption" color="textSecondary">
-                  POLICIES
+                  ALLOWED TOOLS
                 </Typography>
               </Box>
               <Typography variant="h3" sx={{ fontWeight: 700, color: '#ff9800' }}>
-                {agent.policies.length}
+                {agent.allowed_tools.length}
               </Typography>
               <Typography variant="caption" color="warning.main">
-                Active policies
+                Tools in this agent's allowlist
               </Typography>
             </CardContent>
           </Card>
@@ -624,8 +631,8 @@ print(response.json())` : '';
                     </Avatar>
                   </ListItemAvatar>
                   <ListItemText
-                    primary="Active Policies"
-                    secondary={`${agent.policies.length} policies applied`}
+                    primary="Allowed Tools"
+                    secondary={`${agent.allowed_tools.length} tools in this agent's allowlist`}
                   />
                 </ListItem>
 
@@ -754,10 +761,10 @@ print(response.json())` : '';
                 <Grid size={{ xs: 12, sm: 6 }}>
                   <Alert severity="success">
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      Policies Applied
+                      Tool Allowlist
                     </Typography>
                     <Typography variant="caption">
-                      {agent.policies.length} policies enforced on all requests
+                      {agent.allowed_tools.length} allowed tools enforced on this agent
                     </Typography>
                   </Alert>
                 </Grid>

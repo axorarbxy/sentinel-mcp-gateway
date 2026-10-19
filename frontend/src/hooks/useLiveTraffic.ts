@@ -1,5 +1,6 @@
 // hooks/useLiveTraffic.ts
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { API_BASE_URL as API_URL, WEBSOCKET_BASE_URL } from '../services/urls';
 
 export interface TrafficEvent {
   event_id: string;
@@ -144,8 +145,7 @@ interface UseLiveTrafficReturn {
   reconnect: () => void;
 }
 
-const WS_URL = 'ws://localhost:8001/mcp/ws/traffic';
-const API_URL = 'http://localhost:8001';
+const WS_URL = `${WEBSOCKET_BASE_URL}/mcp/ws/traffic`;
 
 export const useLiveTraffic = (
   options: UseLiveTrafficOptions = {}

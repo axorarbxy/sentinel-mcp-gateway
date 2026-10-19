@@ -1,0 +1,4 @@
+Sentinel malware scanner test fixture.
+cmd.exe powershell wscript cscript
+This is plain text for detection testing only. Do not execute.
+

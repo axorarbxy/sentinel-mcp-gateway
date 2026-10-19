@@ -1,5 +1,6 @@
 // pages/Register.tsx - Production Level Registration
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../services/urls';
 import {
   Box,
   Paper,
@@ -149,7 +150,7 @@ const Register: React.FC = () => {
     setActiveStep(1);
 
     try {
-      const response = await fetch('http://localhost:8001/auth/register', {
+      const response = await fetch(`${API_BASE_URL}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -485,11 +486,11 @@ const Register: React.FC = () => {
                 label={
                   <Typography variant="body2">
                     I agree to the{' '}
-                    <Link href="#" color="primary" underline="hover">
+                    <Link component={RouterLink} to="/terms" color="primary" underline="hover">
                       Terms of Service
                     </Link>
                     {' '}and{' '}
-                    <Link href="#" color="primary" underline="hover">
+                    <Link component={RouterLink} to="/privacy" color="primary" underline="hover">
                       Privacy Policy
                     </Link>
                   </Typography>

@@ -129,7 +129,7 @@ const ExtensionBanner: React.FC = () => {
               </StepLabel>
               <Box sx={{ pl: 4, pb: 2 }}>
                 <Typography variant="body2" color="textSecondary">
-                  Extract the ZIP to a folder on your computer. Remember the location.
+                  Extract the ZIP. It will create a <strong>sentinel-mcp-extension</strong> folder containing the extension files.
                 </Typography>
               </Box>
             </Step>
@@ -170,7 +170,7 @@ const ExtensionBanner: React.FC = () => {
               </StepLabel>
               <Box sx={{ pl: 4, pb: 2 }}>
                 <Typography variant="body2" color="textSecondary">
-                  Click <strong>"Load unpacked"</strong> and select the extracted folder.
+                  Click <strong>"Load unpacked"</strong> and select the extracted <strong>sentinel-mcp-extension</strong> folder.
                 </Typography>
               </Box>
             </Step>
