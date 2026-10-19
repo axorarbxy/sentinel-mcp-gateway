@@ -1423,6 +1423,13 @@ async def cybereye_analyze(request: Request):
         "results": results,
         "risk_score": cybereye.get_risk_score()
     }
+    if input_type in {"user", "android"}:
+        # Report the submitted analysis score instead of carrying forward
+        # alerts from previous analyses in the session.
+        response["risk_score"] = max(
+            (float(item.get("data", {}).get("score", 0.0)) for item in results),
+            default=0.0,
+        )
     if input_type == "password":
         password_analyzer = cybereye.modules.get("PasswordAnalyzer")
         if password_analyzer is None:
