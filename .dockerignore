@@ -17,3 +17,7 @@ frontend
 .mypy_cache
 .ruff_cache
 sample_files
+machine_learning/data/*.csv
+machine_learning/data/event_stream/*.csv
+machine_learning/data/event_stream/*.jsonl
+machine_learning/ml_models/qr_scanner/data/
