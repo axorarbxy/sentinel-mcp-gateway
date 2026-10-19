@@ -14,11 +14,13 @@ import {
   Insights as InsightsIcon,
 } from '@mui/icons-material';
 import { logout } from './services/api';
+import { API_BASE_URL } from './services/urls';
 import Dashboard from './components/Dashboard';
 import AlertsPage from './pages/Alerts';
 import AgentDetailsPage from './pages/AgentDetails';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import LegalPage from './pages/LegalPage';
 import Landing from './pages/Landing';
 import ModuleDashboard from './pages/ModuleDashboard';
 import MCPDashboard from './pages/MCPDashboard';
@@ -95,7 +97,7 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   useEffect(() => {
     const checkHealth = async () => {
       try {
-        const response = await fetch('http://localhost:8001/health');
+        const response = await fetch(`${API_BASE_URL}/health`);
         if (response.ok) {
           setSystemStatus('active');
         } else {
@@ -231,6 +233,8 @@ function App() {
             <Route path="/" element={<Landing />} />
             <Route path="/login" element={<Login onLogin={() => setIsAuthenticated(true)} />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/terms" element={<LegalPage />} />
+            <Route path="/privacy" element={<LegalPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </HashRouter>
@@ -245,6 +249,8 @@ function App() {
       <HashRouter>
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/terms" element={<LegalPage />} />
+          <Route path="/privacy" element={<LegalPage />} />
           <Route
             path="/dashboard"
             element={

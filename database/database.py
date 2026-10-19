@@ -2,7 +2,7 @@
 Database Models and Configuration
 """
 
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Float, Text, ForeignKey, UniqueConstraint
+from sqlalchemy import create_engine, inspect, Column, Integer, String, DateTime, Boolean, Float, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 import hashlib
@@ -16,9 +16,14 @@ import re
 # Keep the default SQLite database beside this module so restarting the app
 # from a different working directory cannot silently create a new empty DB.
 DEFAULT_DATABASE_PATH = Path(__file__).resolve().with_name("sentinel_mcp.db")
-DATABASE_URL = os.getenv("DATABASE_URL") or f"sqlite:///{DEFAULT_DATABASE_PATH.as_posix()}"
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or f"sqlite:///{DEFAULT_DATABASE_PATH.as_posix()}"
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = "postgresql+psycopg://" + DATABASE_URL.removeprefix("postgres://")
+elif DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = "postgresql+psycopg://" + DATABASE_URL.removeprefix("postgresql://")
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+engine_options = {"connect_args": {"check_same_thread": False}} if DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(DATABASE_URL, **engine_options)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -28,19 +33,10 @@ def _current_engine():
     return getattr(package, "engine", engine)
 
 
-def _sqlite_has_column(table_name: str, column_name: str) -> bool:
+def _has_column(table_name: str, column_name: str) -> bool:
     try:
         current_engine = _current_engine()
-        inspector = current_engine.dialect.has_table(current_engine.connect(), table_name)
-        if not inspector:
-            return False
-    except Exception:
-        return False
-
-    try:
-        from sqlalchemy import text
-        columns = current_engine.connect().execute(text(f"PRAGMA table_info({table_name})")).fetchall()
-        return any(col[1] == column_name for col in columns)
+        return any(column["name"] == column_name for column in inspect(current_engine).get_columns(table_name))
     except Exception:
         return False
 
@@ -52,7 +48,7 @@ def ensure_mcp_agent_schema() -> None:
         with _current_engine().begin() as conn:
             if not conn.dialect.has_table(conn, "mcp_agents"):
                 return
-            existing_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(mcp_agents)"))]
+            existing_cols = [column["name"] for column in inspect(conn).get_columns("mcp_agents")]
             column_defs = {
                 "name_normalized": "VARCHAR(100)",
                 "description": "VARCHAR(500)",
@@ -61,7 +57,7 @@ def ensure_mcp_agent_schema() -> None:
                 "credential_id": "VARCHAR(16)",
                 "previous_credential_hash": "VARCHAR(255)",
                 "previous_credential_id": "VARCHAR(16)",
-                "previous_credential_expires_at": "DATETIME",
+                "previous_credential_expires_at": "TIMESTAMP",
                 "owner": "VARCHAR(100)",
                 "team": "VARCHAR(100)",
                 "environment": "VARCHAR(32)",
@@ -70,8 +66,8 @@ def ensure_mcp_agent_schema() -> None:
                 "allowed_tools": "TEXT",
                 "metadata": "TEXT",
                 "created_by": "INTEGER",
-                "updated_at": "DATETIME",
-                "deleted_at": "DATETIME",
+                "updated_at": "TIMESTAMP",
+                "deleted_at": "TIMESTAMP",
             }
             for column_name, column_type in column_defs.items():
                 if column_name not in existing_cols:
@@ -147,7 +143,7 @@ def ensure_mcp_request_event_schema() -> None:
             if not conn.dialect.has_table(conn, "mcp_request_events"):
                 return
             existing_cols = {
-                row[1] for row in conn.execute(text("PRAGMA table_info(mcp_request_events)"))
+                column["name"] for column in inspect(conn).get_columns("mcp_request_events")
             }
             column_defs = {
                 "sqli_findings_json": "TEXT NOT NULL DEFAULT '[]'",

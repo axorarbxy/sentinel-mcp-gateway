@@ -20,6 +20,8 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from typing import Set
+import base64
+import binascii
 import asyncio
 import hashlib
 import uvicorn
@@ -155,18 +157,23 @@ async def gateway_lifespan(_app):
     await state.ensure_event_consumer_group(EVENT_CONSUMER_GROUP)
     restore_behavioral_models()
     restore_persisted_alerts()
-    subscriber = asyncio.create_task(_relay_shared_messages(), name="shared-state-subscriber")
-    publisher = asyncio.create_task(run_outbox_publisher(), name="mcp-event-outbox-publisher")
-    consumer = asyncio.create_task(
-        run_event_consumer(_deliver_mcp_stream_event),
-        name="mcp-event-dashboard-consumer",
-    )
+    background_tasks = []
+    run_event_workers = os.getenv("SENTINEL_RUN_EVENT_WORKERS", "true").strip().lower() in {"1", "true", "yes", "on"}
+    if run_event_workers:
+        background_tasks = [
+            asyncio.create_task(_relay_shared_messages(), name="shared-state-subscriber"),
+            asyncio.create_task(run_outbox_publisher(), name="mcp-event-outbox-publisher"),
+            asyncio.create_task(
+                run_event_consumer(_deliver_mcp_stream_event),
+                name="mcp-event-dashboard-consumer",
+            ),
+        ]
     try:
         yield
     finally:
-        for task in (subscriber, publisher, consumer):
+        for task in background_tasks:
             task.cancel()
-        for task in (subscriber, publisher, consumer):
+        for task in background_tasks:
             try:
                 await task
             except asyncio.CancelledError:
@@ -382,6 +389,7 @@ gateway_plugins = GatewayPluginManager()
 
 # Initialize CyberEye modules
 cybereye = ModuleManager()
+payload_analysis_count = 0
 
 # Track requests
 request_log = []
@@ -1413,9 +1421,21 @@ async def cybereye_analyze(request: Request):
         }
 
     if input_type == "file" and isinstance(input_data, dict):
-        content = input_data.get("content")
-        if isinstance(content, str) and len(content.encode("utf-8")) > 10 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="File content exceeds the 10 MB scan limit")
+        encoded_content = input_data.get("content_base64")
+        if encoded_content is not None:
+            if not isinstance(encoded_content, str):
+                raise HTTPException(status_code=422, detail="Encoded file content must be a base64 string")
+            try:
+                file_content = base64.b64decode(encoded_content, validate=True)
+            except (binascii.Error, ValueError):
+                raise HTTPException(status_code=422, detail="File content is not valid base64")
+            if len(file_content) > 10 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="File content exceeds the 10 MB scan limit")
+            input_data = {"content": file_content, "filename": input_data.get("filename", "uploaded-file")}
+        else:
+            content = input_data.get("content")
+            if isinstance(content, str) and len(content.encode("utf-8")) > 10 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="File content exceeds the 10 MB scan limit")
 
     results = cybereye.analyze(input_type, input_data)
     response = {
@@ -1459,7 +1479,9 @@ async def cybereye_alerts(limit: int = 20):
 
 @app.get("/cybereye/stats", tags=["CyberEye"])
 async def cybereye_stats():
-    return cybereye.get_module_stats()
+    stats = cybereye.get_module_stats()
+    stats["modules"]["Payload Analyzer"] = {"total_analyses": payload_analysis_count}
+    return stats
 
 
 @app.get("/cybereye/risk", tags=["CyberEye"])
@@ -1488,9 +1510,11 @@ async def health_check():
 
 @app.post("/api/ml/score", tags=["Monitoring"], summary="Score a payload using the Random Forest payload model")
 async def score_ml_payload(request: Request):
+    global payload_analysis_count
     payload = await request.json()
     text = payload.get("payload") if isinstance(payload, dict) else payload
     result = score_payload(text)
+    payload_analysis_count += 1
     return result
 
 
@@ -1629,7 +1653,11 @@ async def simulate_event_stream_attack(request: Request):
                 "policy_matched_rules": policy_rule_hits,
                 "ml_detected": anomaly,
                 "ml_explanation": data["behavioral_explanation"],
-                "cep_findings": [finding["matched_rule_ids"][0] for finding in correlations],
+                "cep_findings": [
+                    rule_id
+                    for finding in correlations
+                    for rule_id in (finding.get("data", {}).get("matched_rule_ids") or [])[:1]
+                ],
             })
             await traffic_broadcaster.broadcast(event)
 
@@ -1651,8 +1679,12 @@ async def simulate_event_stream_attack(request: Request):
             ),
             "ml_detected_events": sum(item["ml_detected"] for item in detections),
             "cep_findings": [
-                {"rule_id": finding["matched_rule_ids"][0], "summary": finding["decision_reason"]}
+                {
+                    "rule_id": finding["data"]["matched_rule_ids"][0],
+                    "summary": finding["data"]["decision_reason"],
+                }
                 for finding in cep_findings
+                if finding.get("data", {}).get("matched_rule_ids")
             ],
             "events": detections,
         }

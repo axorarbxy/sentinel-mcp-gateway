@@ -39,6 +39,7 @@ const SQLiPolicies: React.FC = () => {
   const [toolModes, setToolModes] = useState<Record<string, SQLMode>>({});
   const [toolName, setToolName] = useState('');
   const [toolMode, setToolMode] = useState<SQLMode>('query_tool');
+  const [toolNameError, setToolNameError] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -77,9 +78,10 @@ const SQLiPolicies: React.FC = () => {
 
   const saveToolMode = async () => {
     if (!toolName.trim()) {
-      setError('Enter a tool name first.');
+      setToolNameError('Enter the exact SQL tool name exposed by your MCP server.');
       return;
     }
+    setToolNameError('');
     setSaving(true);
     try {
       await api.put(
@@ -110,7 +112,19 @@ const SQLiPolicies: React.FC = () => {
           `none` treats SQL-like input as suspicious; `query_tool` checks restricted operations; `readonly` permits SELECT-only behavior.
         </Typography>
         <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: { sm: 'center' }, gap: 1.5 }}>
-          <TextField size="small" label="Tool name" value={toolName} onChange={event => setToolName(event.target.value)} />
+          <TextField
+            size="small"
+            label="Tool name"
+            placeholder="e.g. db/query"
+            value={toolName}
+            onChange={event => {
+              setToolName(event.target.value);
+              if (toolNameError) setToolNameError('');
+            }}
+            error={!!toolNameError}
+            helperText={toolNameError || 'Use the exact name from the MCP server’s tools/list response.'}
+            sx={{ minWidth: { sm: 280 } }}
+          />
           <FormControl size="small" sx={{ minWidth: 170 }}>
             <InputLabel id="sql-mode-label">SQL mode</InputLabel>
             <Select labelId="sql-mode-label" label="SQL mode" value={toolMode} onChange={event => setToolMode(event.target.value as SQLMode)}>
@@ -119,7 +133,7 @@ const SQLiPolicies: React.FC = () => {
               <MenuItem value="readonly">readonly</MenuItem>
             </Select>
           </FormControl>
-          <Button variant="contained" onClick={saveToolMode} disabled={saving || !toolName.trim()}>
+          <Button variant="contained" onClick={saveToolMode} disabled={saving}>
             {saving ? <CircularProgress size={18} color="inherit" /> : 'Save mode'}
           </Button>
         </Box>

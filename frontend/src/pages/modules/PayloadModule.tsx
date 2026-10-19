@@ -18,6 +18,9 @@ interface PayloadResult {
   top_signals: string[];
   decision: 'ALLOW' | 'WARN' | 'BLOCK';
   fallback: boolean;
+  model_score?: number;
+  rule_score?: number;
+  model_available?: boolean;
   model_version: string;
 }
 
@@ -123,7 +126,13 @@ const PayloadModule: React.FC = () => {
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1 }}>
             {result.top_signals.map(signal => <Chip key={signal} label={signal} size="small" variant="outlined" />)}
           </Box>
-          {result.fallback && <Alert severity="warning" sx={{ mt: 2 }}>No model score was produced; do not treat this result as a safe verdict.</Alert>}
+          {result.fallback && <Alert severity="warning" sx={{ mt: 2 }}>The ML model did not provide a score. This result uses the built-in pattern checks only, so an ALLOW result is not a safety guarantee.</Alert>}
+          {result.rule_score !== undefined && result.rule_score > 0 && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+              High-confidence rule score: {(result.rule_score * 100).toFixed(0)}%
+              {result.model_score !== undefined ? ` · Model score: ${(result.model_score * 100).toFixed(0)}%` : ''}
+            </Typography>
+          )}
           <Alert severity="info" sx={{ mt: 2 }}>
             Advisory analysis only. Gateway policy rules remain authoritative for live MCP requests.
           </Alert>

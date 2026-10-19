@@ -19,18 +19,20 @@ interface ModuleStats {
   path: string;
   description: string;
   status: string;
+  statsKey: string;
+  activityLabel: 'events' | 'analyses';
   events: number;
 }
 
 const modules: ModuleStats[] = [
-  { name: 'Phishing Detection', icon: '🔗', path: '/modules/phishing', description: 'URL phishing detection', status: 'active', events: 0 },
-  { name: 'Malware Detection', icon: '🦠', path: '/modules/malware', description: 'File/APK malware analysis', status: 'active', events: 0 },
-  { name: 'Network IDS', icon: '🌐', path: '/modules/network', description: 'Network intrusion detection', status: 'active', events: 0 },
-  { name: 'Payload Analyzer', icon: '⌘', path: '/modules/payload', description: 'Score MCP and command payloads', status: 'active', events: 0 },
-  { name: 'Insider Threat', icon: '👤', path: '/modules/insider', description: 'User behavior analysis', status: 'active', events: 0 },
-  { name: 'Android Security', icon: '📱', path: '/modules/android', description: 'App permission auditing', status: 'active', events: 0 },
-  { name: 'Password Analyzer', icon: '🔑', path: '/modules/password', description: 'Password strength check', status: 'active', events: 0 },
-  { name: 'QR Scanner', icon: '📷', path: '/modules/qr', description: 'QR code safety check', status: 'active', events: 0 },
+  { name: 'Phishing Detection', icon: '🔗', path: '/modules/phishing', description: 'URL phishing detection', status: 'active', statsKey: 'PhishingDetector', activityLabel: 'events', events: 0 },
+  { name: 'Malware Detection', icon: '🦠', path: '/modules/malware', description: 'File/APK malware analysis', status: 'active', statsKey: 'MalwareDetector', activityLabel: 'events', events: 0 },
+  { name: 'Network IDS', icon: '🌐', path: '/modules/network', description: 'Network intrusion detection', status: 'active', statsKey: 'NetworkIDS', activityLabel: 'events', events: 0 },
+  { name: 'Payload Analyzer', icon: '⌘', path: '/modules/payload', description: 'Score MCP and command payloads', status: 'active', statsKey: 'Payload Analyzer', activityLabel: 'analyses', events: 0 },
+  { name: 'Insider Threat', icon: '👤', path: '/modules/insider', description: 'User behavior analysis', status: 'active', statsKey: 'InsiderThreatDetector', activityLabel: 'events', events: 0 },
+  { name: 'Android Security', icon: '📱', path: '/modules/android', description: 'App permission auditing', status: 'active', statsKey: 'AndroidSecurityAnalyzer', activityLabel: 'events', events: 0 },
+  { name: 'Password Analyzer', icon: '🔑', path: '/modules/password', description: 'Password strength check', status: 'active', statsKey: 'PasswordAnalyzer', activityLabel: 'events', events: 0 },
+  { name: 'QR Scanner', icon: '📷', path: '/modules/qr', description: 'QR code safety check', status: 'active', statsKey: 'QRSafetyChecker', activityLabel: 'events', events: 0 },
 ];
 
 const ModuleDashboard: React.FC = () => {
@@ -39,24 +41,35 @@ const ModuleDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let isCurrent = true;
     const fetchStats = async () => {
       try {
         const response = await gatewayFetch('/cybereye/stats');
         if (response.ok) {
           const data = await response.json();
-          setModuleStats(prev => prev.map(module => ({
-            ...module,
-            events: data.modules?.[module.name]?.total_events || 0,
-          })));
+          if (isCurrent) {
+            setModuleStats(prev => prev.map(module => {
+              const moduleData = data.modules?.[module.statsKey];
+              const count = module.activityLabel === 'analyses'
+                ? moduleData?.total_analyses
+                : moduleData?.total_events;
+              return { ...module, events: typeof count === 'number' ? count : 0 };
+            }));
+          }
         }
       } catch (error) {
         console.error('Failed to fetch module stats:', error);
       } finally {
-        setLoading(false);
+        if (isCurrent) setLoading(false);
       }
     };
 
     fetchStats();
+    const refreshTimer = window.setInterval(fetchStats, 10_000);
+    return () => {
+      isCurrent = false;
+      window.clearInterval(refreshTimer);
+    };
   }, []);
 
   const handleModuleClick = (path: string) => {
@@ -118,7 +131,7 @@ const ModuleDashboard: React.FC = () => {
                     color={module.status === 'active' ? 'success' : 'default'}
                   />
                   <Typography variant="caption" color="textSecondary">
-                    {module.events} events
+                    {module.events.toLocaleString()} {module.activityLabel}
                   </Typography>
                 </Box>
               </CardContent>

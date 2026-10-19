@@ -40,7 +40,7 @@ import {
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 
-const API_URL = 'http://localhost:8001';
+import { API_BASE_URL as API_URL } from '../services/urls';
 
 // ============ TYPES ============
 interface MCPServer {

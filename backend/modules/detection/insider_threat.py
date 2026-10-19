@@ -5,8 +5,11 @@ Flags anomalous behavior from internal users
 
 from typing import Dict, Any, Optional, List
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import logging
 from ..base_module import SecurityModule, SecurityEvent
+
+logger = logging.getLogger(__name__)
 
 class InsiderThreatDetector(SecurityModule):
     """Detects insider threats using behavioral analysis"""
@@ -58,18 +61,22 @@ class InsiderThreatDetector(SecurityModule):
             if not user_id:
                 return None
             
-            # Record activity
-            self.user_activity[user_id].append(input_data)
+            activity = dict(input_data)
+            activity["timestamp"] = self._parse_timestamp(input_data.get("timestamp")).isoformat()
+
+            # Score every submitted event; demo and first-seen user activity
+            # should not disappear while a ten-event baseline is collected.
+            self.user_activity[user_id].append(activity)
             
             # Keep only recent activity
-            cutoff = datetime.now() - timedelta(days=30)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=30)
             self.user_activity[user_id] = [
                 a for a in self.user_activity[user_id]
-                if datetime.fromisoformat(a.get("timestamp", datetime.now().isoformat())) > cutoff
+                if self._parse_timestamp(a.get("timestamp")) > cutoff
             ]
             
             # Analyze for anomalies
-            return self._analyze_user(user_id, input_data)
+            return self._analyze_user(user_id, activity)
             
         except Exception as e:
             logger.error(f"Error analyzing insider threat: {e}")
@@ -79,43 +86,89 @@ class InsiderThreatDetector(SecurityModule):
         """Analyze a user's activity"""
         indicators = []
         score = 0.0
-        confidence = 0.3
+        confidence = 0.45
         
         # Get user's history
         history = self.user_activity[user_id]
-        if len(history) < 10:
-            # Not enough data for baseline
-            return None
+        # Behavioral baselines improve over time, but deterministic indicators
+        # can score a single event without waiting for history.
         
         # 1. Check after-hours access
-        timestamp = datetime.fromisoformat(current_activity.get("timestamp", datetime.now().isoformat()))
-        if self._is_after_hours(timestamp):
+        timestamp = self._parse_timestamp(current_activity.get("timestamp"))
+        try:
+            activity_hour = int(current_activity.get("local_hour", timestamp.hour))
+        except (TypeError, ValueError):
+            activity_hour = timestamp.hour
+        try:
+            activity_weekday = int(current_activity.get("local_weekday", timestamp.weekday()))
+        except (TypeError, ValueError):
+            activity_weekday = timestamp.weekday()
+        if self._is_after_hours(timestamp.replace(hour=activity_hour % 24)):
             indicators.append("after_hours_access")
-            score += 0.3
-            confidence = max(confidence, 0.4)
+            score += 0.15
+            confidence = max(confidence, 0.5)
         
         # 2. Check weekend access
-        if self._is_weekend(timestamp):
+        if activity_weekday in self.config["weekend_days"]:
             indicators.append("weekend_access")
-            score += 0.2
-            confidence = max(confidence, 0.3)
+            score += 0.15
+            confidence = max(confidence, 0.5)
         
         # 3. Check large data transfer
-        if current_activity.get("data_size", 0) > self.config["large_download_threshold"]:
+        try:
+            data_size = float(current_activity.get("data_size", 0))
+        except (TypeError, ValueError):
+            data_size = 0
+        if data_size > self.config["large_download_threshold"]:
             indicators.append("large_data_transfer")
             score += 0.4
             confidence = max(confidence, 0.6)
+
+        try:
+            record_count = int(current_activity.get("records_count", current_activity.get("record_count", 0)))
+        except (TypeError, ValueError):
+            record_count = 0
+        if record_count >= 1000:
+            indicators.append("bulk_record_access")
+            score += 0.4
+            confidence = max(confidence, 0.75)
+        elif record_count >= 250:
+            indicators.append("large_record_access")
+            score += 0.25
+            confidence = max(confidence, 0.65)
+
+        activity_text = " ".join(str(current_activity.get(key, "")) for key in ("action", "result", "description")).lower()
+        if any(term in activity_text for term in ("bulk export", "mass export", "bulk download", "database dump")):
+            indicators.append("bulk_export_activity")
+            score += 0.4
+            confidence = max(confidence, 0.75)
+        elif any(term in activity_text for term in ("download", "export")):
+            indicators.append("data_download_or_export")
+            score += 0.2
+            confidence = max(confidence, 0.6)
+
+        location_text = str(current_activity.get("location", "")).lower()
+        if (current_activity.get("unfamiliar_location") or current_activity.get("unfamiliar_ip")
+                or "unfamiliar" in location_text or "unknown" in location_text):
+            indicators.append("unfamiliar_location_or_ip")
+            score += 0.3
+            confidence = max(confidence, 0.7)
         
         # 4. Check high frequency
-        recent = [a for a in history 
-                 if (datetime.now() - datetime.fromisoformat(a.get("timestamp", datetime.now().isoformat()))).total_seconds() < 3600]
+        now = datetime.now(timezone.utc)
+        recent = [a for a in history
+                  if (now - self._parse_timestamp(a.get("timestamp"))).total_seconds() < 3600]
         if len(recent) > self.config["high_frequency_threshold"]:
             indicators.append("high_request_frequency")
             score += 0.3
             confidence = max(confidence, 0.5)
         
         # 5. Check unusual data access
-        if "unusual_access" in current_activity.get("flags", []):
+        flags = current_activity.get("flags", [])
+        if not isinstance(flags, (list, tuple, set)):
+            flags = [str(flags)]
+        normalized_flags = {str(flag).lower() for flag in flags}
+        if "unusual_access" in normalized_flags or "suspicious_activity" in normalized_flags:
             indicators.append("unusual_data_access")
             score += 0.5
             confidence = max(confidence, 0.7)
@@ -127,16 +180,16 @@ class InsiderThreatDetector(SecurityModule):
             confidence = max(confidence, 0.8)
         
         # 7. Check for data exfiltration patterns
-        if current_activity.get("external_transfer", False):
+        if current_activity.get("external_transfer", False) or any(term in activity_text for term in ("external transfer", "uploaded externally", "sent to external")):
             indicators.append("external_data_transfer")
             score += 0.5
             confidence = max(confidence, 0.7)
         
         # Normalize
-        score = min(score, 1.0)
         confidence = min(confidence, 0.95)
         
-        if score > 0.5:
+        score = min(score, 1.0)
+        if score >= 0.5:
             severity = "HIGH" if score > 0.8 else "MEDIUM"
             return self.generate_event(
                 event_type="insider_threat_detected",
@@ -153,6 +206,16 @@ class InsiderThreatDetector(SecurityModule):
             )
         
         return None
+
+    @staticmethod
+    def _parse_timestamp(value: Any) -> datetime:
+        try:
+            parsed = datetime.fromisoformat(str(value)) if value else datetime.now(timezone.utc)
+        except (TypeError, ValueError):
+            parsed = datetime.now(timezone.utc)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
     
     def _is_after_hours(self, timestamp: datetime) -> bool:
         """Check if timestamp is after hours"""

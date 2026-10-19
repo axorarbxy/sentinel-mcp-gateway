@@ -1,5 +1,5 @@
 // pages/modules/ModuleBase.tsx
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Box,
   Paper,
@@ -14,6 +14,7 @@ import {
   Alert,
   Divider,
 } from '@mui/material';
+import { AttachFile as AttachFileIcon, Close as CloseIcon } from '@mui/icons-material';
 import {
   CheckCircle as CheckCircleIcon,
   Warning as WarningIcon,
@@ -29,7 +30,7 @@ interface ModuleBaseProps {
   inputLabel: string;
   inputPlaceholder: string;
   inputType: 'url' | 'file' | 'network' | 'user' | 'android' | 'password' | 'qr';
-  onAnalyze: (input: string) => Promise<any>;
+  onAnalyze: (input: string, file?: File) => Promise<any>;
 }
 
 const ModuleBase: React.FC<ModuleBaseProps> = ({
@@ -45,10 +46,26 @@ const ModuleBase: React.FC<ModuleBaseProps> = ({
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const encodeFile = async (file: File): Promise<string> => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+    }
+    return btoa(binary);
+  };
 
   const handleAnalyze = async () => {
-    if (!input.trim()) {
-      setError('Please enter something to analyze');
+    if (!input.trim() && !selectedFile) {
+      setError(inputType === 'file' ? 'Choose a file, paste file text, or enter an MD5 hash.' : 'Please enter something to analyze');
+      return;
+    }
+    if (selectedFile && selectedFile.size > 10 * 1024 * 1024) {
+      setError('Choose a file smaller than 10 MB.');
       return;
     }
 
@@ -57,7 +74,9 @@ const ModuleBase: React.FC<ModuleBaseProps> = ({
     setResults(null);
 
     try {
-      const response = await onAnalyze(input);
+      const response = selectedFile
+        ? await onAnalyze(await encodeFile(selectedFile), selectedFile)
+        : await onAnalyze(input);
       setResults(response);
     } catch (err: any) {
       setError(err.message || 'Analysis failed. Please try again.');
@@ -133,7 +152,10 @@ const ModuleBase: React.FC<ModuleBaseProps> = ({
             rows={inputType === 'file' ? 3 : 2}
             placeholder={inputPlaceholder}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              if (e.target.value) setSelectedFile(null);
+            }}
             variant="outlined"
             sx={{ flex: 1 }}
             disabled={loading}
@@ -141,7 +163,7 @@ const ModuleBase: React.FC<ModuleBaseProps> = ({
           <Button
             variant="contained"
             onClick={handleAnalyze}
-            disabled={loading || !input.trim()}
+            disabled={loading || (!input.trim() && !selectedFile)}
             sx={{
               minWidth: 120,
               py: 1.5,
@@ -155,6 +177,38 @@ const ModuleBase: React.FC<ModuleBaseProps> = ({
             {loading ? <CircularProgress size={24} color="inherit" /> : 'Analyze'}
           </Button>
         </Box>
+        {inputType === 'file' && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mt: 1.5 }}>
+            <Button component="label" variant="outlined" size="small" startIcon={<AttachFileIcon />} disabled={loading}>
+              Choose file
+              <input
+                ref={fileInputRef}
+                hidden
+                type="file"
+                onChange={(event) => {
+                  const file = event.target.files?.[0] || null;
+                  setSelectedFile(file);
+                  if (file) setInput('');
+                  setError(null);
+                  setResults(null);
+                }}
+              />
+            </Button>
+            {selectedFile ? (
+              <Chip
+                label={`${selectedFile.name} · ${(selectedFile.size / 1024).toFixed(1)} KB`}
+                variant="outlined"
+                onDelete={() => {
+                  setSelectedFile(null);
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }}
+                deleteIcon={<CloseIcon />}
+              />
+            ) : (
+              <Typography variant="caption" color="text.secondary">Maximum file size: 10 MB</Typography>
+            )}
+          </Box>
+        )}
         {error && (
           <Alert severity="error" sx={{ mt: 2 }}>
             {error}

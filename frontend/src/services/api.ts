@@ -2,7 +2,9 @@
 import axios from 'axios';
 import { StatsResponse, HealthResponse, LogEntry, Alert, AgentStats } from '../types';
 
-const API_BASE_URL = 'http://localhost:8001';
+import { API_BASE_URL } from './urls';
+
+export { API_BASE_URL } from './urls';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
