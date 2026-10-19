@@ -738,7 +738,7 @@ async def configure_shared_state() -> InMemorySharedState | RedisSharedState:
     """Connect the configured backend; production never silently falls back locally."""
     global _shared_state
     redis_url = (
-        os.getenv("SENTINEL_REDIS_URL")
+        os.getenv("SENTINEL_REDIS_URL") or os.getenv("SENTINEL_REDIS_REDIS_URL")
         or os.getenv("UPSTASH_REDIS_URL")
         or os.getenv("REDIS_URL", "")
     ).strip()
