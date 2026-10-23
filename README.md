@@ -1,234 +1,218 @@
-\# 🛡️ Sentinel-MCP Gateway
-
-
-
-\### AI/ML Security Monitoring Framework for MCP-Connected Ecosystems
-
-
-
-\[!\[Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-
-\[!\[FastAPI](https://img.shields.io/badge/FastAPI-0.115.0-green.svg)](https://fastapi.tiangolo.com/)
-
-\[!\[Research](https://img.shields.io/badge/Research-SECUREVENT%202026-red.svg)](https://arxiv.org/abs/2606.01741)
-
-\[!\[License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-
-
-
-\---
-
-
-
-\## 📋 Overview
-
-
-
-\*\*Sentinel-MCP\*\* is a cutting-edge security monitoring framework for AI agents using the Model Context Protocol (MCP). Built on 2026 research foundations, it provides \*\*three-layer defense\*\*:
-
-
-
-1\. \*\*Rule-based Policy Engine\*\* - Blocks dangerous operations (path traversal, malicious commands, SQL injection)
-
-2\. \*\*Behavioral Analysis\*\* - Detects suspicious patterns (rapid requests, unusual timing, operation chains)
-
-3\. \*\*ML Anomaly Detection\*\* - Uses Isolation Forest to identify behavioral deviations
-
-
-
-\### 🎯 Why This Matters
-
-
-
-> \*"MCP servers wrapping offensive tools introduce higher risk than skill-based resources"\* - 2026 MCP Security Research
-
-
-
-As AI agents gain access to more tools (filesystem, shell, databases, network), securing the \*\*MCP communication layer\*\* becomes critical. Sentinel-MCP acts as a \*\*security proxy\*\* between AI agents and their tools, ensuring every operation is validated, monitored, and audited.
-
-
-
-\---
-
-
-
-\## 🔬 Research Foundation
-
-
-
-This project implements the hybrid approach proposed in:
-
-
-
-| Paper | Year | Contribution |
-
-|-------|------|--------------|
-
-| \*\*SECUREVENT\*\* (arXiv 2606.01741) | 2026 | Hybrid AI/ML monitoring for distributed event systems |
-
-| \*\*MCP Security Analysis\*\* | 2026 | MCP attack surface identification |
-
-| \*\*Agentic SOC Evolution\*\* | 2026 | AI-powered security operations |
-
-
-
-\*\*Key Research Contributions:\*\*
-
-\- ✅ Online anomaly detection for event-based systems
-
-\- ✅ Graph-aware behavioral feature extraction
-
-\- ✅ Policy-as-code integration with model scoring
-
-\- ✅ MITRE ATLAS mapping for AI-specific threats
-
-
-
-\---
-
-
-
-\## ✨ Features
-
-
-
-\### 🔒 Security Policies
-
-\- \*\*Path Traversal Prevention\*\* - Blocks access to `/etc/passwd`, `.env`, `.git`, etc.
-
-\- \*\*Command Whitelisting\*\* - Only allows safe commands (`ls`, `pwd`, `whoami`, etc.)
-
-\- \*\*SQL Injection Protection\*\* - Detects `DROP`, `DELETE`, `TRUNCATE`, and other dangerous patterns
-
-\- \*\*Zero-Trust Architecture\*\* - Block by default, allow explicitly
-
-
-
-\### 🧠 ML Anomaly Detection
-
-\- \*\*Behavioral Profiling\*\* - Learns normal agent behavior patterns
-
-\- \*\*Isolation Forest\*\* - Unsupervised anomaly detection
-
-\- \*\*Feature Engineering\*\* - Extracts 15+ behavioral features:
-
-&#x20; - Request frequency and timing
-
-&#x20; - Method type distribution
-
-&#x20; - Parameter complexity
-
-&#x20; - Command length and structure
-
-&#x20; - SQL complexity patterns
-
-\- \*\*Real-time Detection\*\* - Identifies anomalies within milliseconds
-
-
-
-\### 📊 Monitoring \& Auditing
-
-\- \*\*Request Logging\*\* - Complete audit trail of all MCP operations
-
-\- \*\*Alert System\*\* - Real-time anomaly alerts
-
-\- \*\*Statistics Dashboard\*\* - Visualize block rates, method distribution, anomaly counts
-
-\- \*\*Agent Profiling\*\* - Per-agent behavioral models
-
-
-
-\### 🎯 MITRE ATLAS Ready
-
-Maps security violations to MITRE ATLAS techniques:
-
-\- AML.T0086 - Exfiltration via AI Agent Tool Invocation
-
-\- AML.T0043 - Adversarial AI System Compromise
-
-\- AML.T0010 - Data Poisoning via AI System Input
-
-
-
-\---
-
-
-
-\## 🚀 Quick Start
-
-
-
-\### Prerequisites
-
-\- Python 3.11 or higher
-
-\- Git
-
-
-
-\### Installation
-
-
+<div align="center">
+
+# 🛡️ Sentinel MCP Gateway
+
+### A security checkpoint for AI agents and MCP tools
+
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![MCP](https://img.shields.io/badge/Protocol-MCP-7C3AED)](https://modelcontextprotocol.io/)
+[![Security](https://img.shields.io/badge/Design-zero--trust-E11D48)](#-security-at-a-glance)
+[![Research](https://img.shields.io/badge/Research-SECUREVENT%202026-F59E0B)](https://arxiv.org/abs/2606.01741)
+[![License](https://img.shields.io/badge/License-MIT-2563EB)](LICENSE)
+
+**Inspect, enforce, and audit MCP traffic between agents and their tools.**
+
+[Quick start](#-quick-start) · [Architecture](#-how-it-fits-together) · [Security](#-security-at-a-glance) · [Operations](#-mcp-request-interception)
+
+</div>
+
+---
+
+## 🌈 What Sentinel does
+
+Sentinel sits between an AI agent and an MCP server. It authenticates each agent, checks each request against policy, forwards permitted traffic to a configured upstream, and records a redacted event for operators.
+
+| 🔐 **Control** | 🧠 **Understand** | 📡 **Operate** |
+|:--|:--|:--|
+| Per-agent credentials, tool allowlists, input validation, and fail-closed decision hooks. | Behavioral baselines and anomaly signals complement deterministic policy decisions. | Auditable request history, live dashboard events, and optional Redis, MQTT, or Kafka delivery. |
+
+> **Design principle:** policy makes the synchronous allow/block decision. Behavioral and correlation detections add investigation signals and do not silently turn into an enforcement verdict.
+
+## 🧭 How it fits together
+
+```mermaid
+flowchart LR
+  A[🟦 AI agent / Codex] -->|Bearer agent key · JSON-RPC| G
+  subgraph S[🛡️ Sentinel gateway]
+    G[🟪 Authenticate agent] --> V[🟦 Validate MCP message]
+    V --> P{🟥 Policy decision}
+    P -->|block| D[⛔ Return JSON-RPC error]
+    P -->|allow / flag| U[🟩 Forward to configured upstream]
+    U --> R[🟨 Inspect response · filter tools]
+    R --> E[🟧 Redact and persist event]
+  end
+  E --> DB[(🟦 Audit database)]
+  E --> Q[🟪 Event outbox]
+  Q --> X[(🟩 Redis Streams / optional sinks)]
+  X --> UI[📊 Live operator dashboard]
+  R --> A
+  classDef blue fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px;
+  classDef purple fill:#EDE9FE,stroke:#7C3AED,color:#3B0764,stroke-width:2px;
+  classDef red fill:#FFE4E6,stroke:#E11D48,color:#881337,stroke-width:2px;
+  classDef green fill:#DCFCE7,stroke:#16A34A,color:#14532D,stroke-width:2px;
+  classDef yellow fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px;
+  classDef orange fill:#FFEDD5,stroke:#EA580C,color:#7C2D12,stroke-width:2px;
+  class A,DB,UI blue;
+  class G,X purple;
+  class P,D red;
+  class U green;
+  class V,R yellow;
+  class E,Q orange;
+```
+
+## 🎨 Three layers of defense
+
+```mermaid
+flowchart LR
+  REQ[📨 MCP request] --> POLICY{🔴 Deterministic policy}
+  POLICY -->|deny| STOP[⛔ Block before upstream]
+  POLICY -->|allow / flag| UP[🟢 Forward to MCP upstream]
+  REQ -. observation .-> BASE[🟠 Per-agent behavior baseline]
+  BASE --> SIGNAL[Anomaly signal]
+  UP --> EVENT[🟣 Redacted versioned event]
+  STOP --> EVENT
+  SIGNAL --> EVENT
+  EVENT --> STORE[(🟨 Audit + outbox)]
+  STORE --> STREAM[🟦 Shared event stream]
+  STREAM --> CORR[Correlation rules]
+  CORR --> DASH[📊 Operator visibility]
+  classDef red fill:#FFE4E6,stroke:#E11D48,color:#881337,stroke-width:2px;
+  classDef orange fill:#FFEDD5,stroke:#EA580C,color:#7C2D12,stroke-width:2px;
+  classDef purple fill:#EDE9FE,stroke:#7C3AED,color:#3B0764,stroke-width:2px;
+  classDef green fill:#DCFCE7,stroke:#16A34A,color:#14532D,stroke-width:2px;
+  classDef blue fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px;
+  classDef yellow fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px;
+  class POLICY,STOP red;
+  class BASE,SIGNAL orange;
+  class EVENT,CORR purple;
+  class UP green;
+  class STREAM,DASH blue;
+  class STORE yellow;
+```
+## ✨ Capabilities
+
+- **🧱 Policy enforcement:** per-agent allowed tools, strict handling of unknown methods, and an asynchronous decision hook that fails closed on error or timeout.
+- **🔑 Credential lifecycle:** one-time agent keys, rotation and revocation, suspension, and distinct operator authentication.
+- **🧠 Behavioral monitoring:** per-agent Isolation Forest baselines, bounded argument-shape signals, and anomaly alerts.
+- **🧾 Safer telemetry:** versioned events with sensitive values redacted before persistence or broadcast.
+- **⚡ Durable delivery:** transactional outbox, retry and dead-letter handling, Redis Streams, and optional MQTT/Kafka fan-out.
+- **📈 Operator dashboard:** inspect agents, policies, alerts, events, and live traffic from the frontend.
+
+## 🛡️ Security at a glance
+
+| 🟢 Request path | 🔴 Failure behavior |
+|:--|:--|
+| Authenticated agent key; credential-free upstream selection; session bound to agent and upstream. | Unknown or revoked key: `401`; suspended agent: `403`; throttled: `429`. |
+| JSON-RPC 2.0 validation, size/depth limits, duplicate-key checks, and tool policy. | Invalid messages are rejected before forwarding; blocked tools return a JSON-RPC error. |
+| Redacted audit event persisted with the decision; event publication handled asynchronously. | Missing upstream: `503`; unavailable or invalid upstream response: `502`. |
+
+Use HTTPS outside local development, keep secrets in the deployment environment, and never place an agent key in a URL. See [Agent API key authentication](#agent-api-key-authentication) and [upstream configuration](#configure-an-upstream) for the full behavior and setup.
+
+## 🧩 Event lifecycle
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant A as 🟦 Agent
+  participant G as 🟪 Gateway
+  participant U as 🟩 MCP upstream
+  participant DB as 🟨 Database
+  participant O as 🟧 Outbox publisher
+  participant S as 🟪 Redis Stream
+  participant D as 📊 Dashboard
+  A->>G: Authenticated MCP request
+  G->>G: Validate · decide · redact
+  alt blocked by policy
+    G-->>A: JSON-RPC error
+  else allowed or flagged
+    G->>U: Forward request
+    U-->>G: JSON or streamed response
+    G-->>A: MCP response
+  end
+  G->>DB: Audit row + outbox row in one transaction
+  O->>S: Retryable event publish
+  S-->>D: Consumer group delivery
+```
+
+## 📚 Contents
+
+- [Quick start](#-quick-start)
+- [Agent API key authentication](#agent-api-key-authentication)
+- [MCP request interception](#mcp-request-interception)
+  - [Supported transport](#supported-transport)
+  - [Configure an upstream](#configure-an-upstream)
+  - [Route Codex MCP traffic through Sentinel](#route-codex-mcp-traffic-through-sentinel)
+  - [Decision hook and event schema](#decision-hook-and-event-schema)
+  - [Adaptive per-agent behavior baseline](#adaptive-per-agent-behavior-baseline)
+  - [Durable event pipeline](#durable-event-pipeline)
+  - [Verify a call](#verify-a-call)
+- [Research foundation](#-research-foundation)
+
+## 🚀 Quick start
+
+### Requirements
+
+- Python 3.11 or newer
+- Node.js and npm for the dashboard
+- Redis 6.2 or newer for durable shared streams and multi-worker coordination (optional for local single-process development)
+
+### Install and run
 
 ```bash
-
-\# Clone the repository
-
+# Clone the repository
 git clone https://github.com/axorarbxy/sentinel-mcp-gateway.git
-
 cd sentinel-mcp-gateway
 
-
-
-\# Create virtual environment
-
+# Create and activate a virtual environment
 python -m venv venv
-
-
-
-\# Activate virtual environment
-
-\# Windows:
-
-venv\\Scripts\\activate
-
-\# Mac/Linux:
-
-source venv/bin/activate
-
-
-
-\# Install dependencies
+# Windows PowerShell: .\venv\Scripts\Activate.ps1
+# macOS / Linux:      source venv/bin/activate
 
 pip install -r requirements.txt
-
-# Optional: Redis-backed shared coordination and event delivery
-pip install -r requirements-redis.txt
-
-\# Copy environment settings
 cp .env.example .env
 
-\# Start the backend from the repository root (Windows PowerShell)
+# Terminal 1 — API and gateway (run from the repository root)
 $env:PYTHONUTF8='1'
 $env:PYTHONIOENCODING='utf-8'
-$env:SENTINEL_REDIS_URL='redis://127.0.0.1:6379/0'  # Optional; enables Redis Streams and cross-worker coordination
 python -m uvicorn backend.gateway:app --host 127.0.0.1 --port 8001
 
-\# Start the frontend (separate terminal)
+# Terminal 2 — operator dashboard
 cd frontend
 npm install
 npm start
-
-\# Example: register a demo admin account, then sign in
-curl -X POST http://localhost:8001/auth/register -H "Content-Type: application/json" -d '{"username":"ops","email":"ops@example.com","password":"StrongPass123","full_name":"Ops"}'
-curl -X POST http://localhost:8001/auth/login -H "Content-Type: application/json" -d '{"username_or_email":"ops","password":"StrongPass123"}'
-
-\# Demo registration creates an admin-capable account for local use.
-\# Existing local demo accounts are promoted after a successful login.
-\# Production registrations remain read-only unless separately provisioned.
-\# Use the returned access_token for gateway:admin control-plane endpoints.
 ```
 
+The API listens at `http://localhost:8001`; the frontend starts separately. The application reads configuration from the process environment; copying `.env.example` to `.env` does not load it automatically. To enable Redis-backed delivery, install `requirements-redis.txt` and set `SENTINEL_REDIS_URL` before starting the backend.
+
+### Create a local operator account
+
+For a local demo, register and sign in to obtain an operator access token:
+
+```bash
+curl -X POST http://localhost:8001/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"ops","email":"ops@example.com","password":"StrongPass123","full_name":"Ops"}'
+
+curl -X POST http://localhost:8001/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username_or_email":"ops","password":"StrongPass123"}'
+```
+
+Local demo registration creates an admin-capable account. Production registrations remain read-only unless separately provisioned. Use the returned access token for `gateway:admin` control-plane endpoints.
+
+## 🔬 Research foundation
+
+The project references the [SECUREVENT paper](https://arxiv.org/abs/2606.01741) and applies hybrid monitoring ideas to an MCP gateway. The repository also includes MITRE ATLAS-oriented threat mapping and event-based behavioral analysis.
+
+| Focus | Implementation |
+|:--|:--|
+| Online monitoring | Versioned MCP events and per-agent behavioral baselines |
+| Behavioral context | Method mix, timing, tool novelty, and bounded argument-shape signals |
+| Policy + model signals | Deterministic enforcement paired with anomaly telemetry |
+| Threat investigation | Correlation rules and MITRE ATLAS-oriented alert context |
+
+---
 ## Agent API key authentication
 
 Agent keys use `cye_test_<lookup-id>_<random-secret>` in development and
@@ -451,6 +435,33 @@ events. Each gateway worker maintains its own live model and reconstructs it
 from shared persistence when it starts.
 
 ### Durable event pipeline
+
+```mermaid
+flowchart LR
+  A[🟦 MCP decision] --> T[(🟨 One DB transaction)]
+  T --> E[Audit event]
+  T --> O[Outbox record]
+  O --> W[🟪 Lease · publish · retry]
+  W -->|success| R[(🟩 Redis Stream)]
+  W -->|retry limit| DL[🟥 Dead letter]
+  R --> C[🟧 Consumer group]
+  C --> D[📊 Live dashboard]
+  C --> CEP[🟣 Correlation rules]
+  CEP --> ALERT[🚨 Security alert]
+  classDef blue fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px;
+  classDef yellow fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px;
+  classDef purple fill:#EDE9FE,stroke:#7C3AED,color:#3B0764,stroke-width:2px;
+  classDef green fill:#DCFCE7,stroke:#16A34A,color:#14532D,stroke-width:2px;
+  classDef red fill:#FFE4E6,stroke:#E11D48,color:#881337,stroke-width:2px;
+  classDef orange fill:#FFEDD5,stroke:#EA580C,color:#7C2D12,stroke-width:2px;
+  class A blue;
+  class T yellow;
+  class W,CEP purple;
+  class R green;
+  class DL,ALERT red;
+  class C,D orange;
+```
+
 
 MCP enforcement remains synchronous: the gateway evaluates the request and
 allows, flags, or blocks it before forwarding. Event delivery is decoupled from
