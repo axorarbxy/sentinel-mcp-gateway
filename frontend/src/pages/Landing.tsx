@@ -27,6 +27,7 @@ import {
   ArrowForward as ArrowForwardIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+import SecurityCoverageMatrix from '../components/SecurityCoverageMatrix';
 
 const features = [
   {
@@ -117,6 +118,9 @@ const Landing: React.FC = () => {
               </Button>
               <Button color="inherit" onClick={() => scrollToSection('modules')}>
                 Modules
+              </Button>
+              <Button color="inherit" onClick={() => scrollToSection('security-coverage')}>
+                Security coverage
               </Button>
               <Button
                 variant="outlined"
@@ -311,6 +315,27 @@ const Landing: React.FC = () => {
             </Box>
           ))}
         </Box>
+      </Container>
+
+      {/* Security coverage matrix */}
+      <Container maxWidth="lg" sx={{ py: 7, scrollMarginTop: '80px' }} id="security-coverage">
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'end', gap: 2, mb: 3 }}>
+          <Box>
+            <Typography variant="overline" sx={{ color: '#56E0C3', fontWeight: 800, letterSpacing: 2 }}>
+              MCP RUNTIME CONTROLS
+            </Typography>
+            <Typography variant="h3" component="h2" sx={{ fontWeight: 750, fontSize: { xs: '1.8rem', md: '2.35rem' }, mt: .5 }}>
+              Security coverage matrix
+            </Typography>
+          </Box>
+          <Typography variant="body2" color="textSecondary" sx={{ maxWidth: 470, lineHeight: 1.7 }}>
+            See how gateway-side controls address common indirect prompt-injection outcomes. Decisions are enforced on tool calls, independent of prompt-level instructions.
+          </Typography>
+        </Box>
+        <SecurityCoverageMatrix />
+        <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 1.5, lineHeight: 1.7 }}>
+          Exfiltration blocking depends on upstream tool data being observed in the session and the destination being identified as an outbound tool. Audit events include a payload SHA-256 hash; this is integrity evidence, not a tamper-proof storage guarantee.
+        </Typography>
       </Container>
 
       {/* Modules Section - Using Box with flex instead of Grid */}
