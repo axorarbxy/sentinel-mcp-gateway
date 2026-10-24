@@ -1,4 +1,4 @@
-/** Shared same-origin URLs for local development and Vercel deployments. */
+/** Shared base URLs for local development and production deployments. */
 const isLocalDevelopment =
   typeof window !== 'undefined' &&
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
