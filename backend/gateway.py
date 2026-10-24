@@ -19,7 +19,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
-from typing import Set
+from typing import Any, Set
 import base64
 import binascii
 import asyncio
