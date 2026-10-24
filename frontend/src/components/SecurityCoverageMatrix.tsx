@@ -42,6 +42,11 @@ const rows: {
     coverage: { runtime: 'contextual', context: 'contextual', rate: 'not-applicable', audit: 'enforced' },
   },
   {
+    threat: 'Injected sensitive action',
+    detail: 'Operator-listed write, execute, or transfer tools after upstream data',
+    coverage: { runtime: 'contextual', context: 'enforced', rate: 'not-applicable', audit: 'enforced' },
+  },
+  {
     threat: 'High-frequency tool abuse',
     detail: 'Repeated calls to the same tool (default: 30 calls per minute)',
     coverage: { runtime: 'enforced', context: 'not-applicable', rate: 'enforced', audit: 'enforced' },

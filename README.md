@@ -332,6 +332,13 @@ request reaches its upstream:
   credential or personal-data fields are also labeled in the audit event. The
   marker expires with the MCP session lifetime and is refreshed while the
   session remains active.
+- Operators can set an agent's `untrusted_data_sensitive_tools` metadata to
+  an exact list of high-impact tool names, such as file-write, shell-execution,
+  or payment tools. After any successful tool result in that session, calls to
+  those tools are blocked before forwarding—even when they are in the normal
+  tool allowlist. This keeps untrusted retrieved instructions from authorizing
+  a sensitive action. A malformed policy fails closed once session data is
+  tainted.
 
 Custom outbound tools can be tagged through agent metadata with
 `{"egress_tools":["custom.export"]}`. A narrowly scoped exception for a
@@ -339,6 +346,24 @@ reviewed sink can be configured with `{"trusted_egress_tools":["custom.export"]}
 This trusts the named tool to receive data from the session; grant it only to
 tools and agents that need it. Include other existing metadata when updating
 an agent.
+
+For example, preserve the existing metadata and add an exact sensitive-tool
+list to the agent:
+
+```json
+{
+  "untrusted_data_sensitive_tools": [
+    "filesystem.write",
+    "shell.execute",
+    "payments.transfer"
+  ]
+}
+```
+
+The policy is opt-in and matches exact upstream tool names. Calls made before
+the session returns tool data are unaffected. Configure only actions that
+should not be triggered from a session containing untrusted results; legitimate
+post-retrieval workflows using those tools will also be blocked.
 
 This is a conservative runtime guard, not a complete information-flow proof:
 it blocks outbound calls after any successful tool result, which may interrupt
@@ -717,3 +742,4 @@ bounded by depth, file count, and bytes. Symbolic links and credential/repositor
 metadata paths are rejected or omitted. Platform filesystem semantics still
 matter: keep the workspace owned by a dedicated service account and prevent
 other local users from changing its directory tree while the service runs.
+
