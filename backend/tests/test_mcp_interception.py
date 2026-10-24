@@ -107,11 +107,11 @@ def test_stats_and_behavioral_models_restore_from_persisted_events(gateway_clien
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     db = session_factory()
     try:
-        for index in range(20):
+        for index in range(21):
             blocked = index == 0
             db.add(MCPRequestEvent(
                 event_id=f"persisted-event-{index}",
-                timestamp=now - timedelta(minutes=19 - index),
+                timestamp=now - timedelta(minutes=20 - index),
                 agent_id=9001,
                 agent_name="persisted-agent",
                 method="tools/call",
@@ -134,13 +134,13 @@ def test_stats_and_behavioral_models_restore_from_persisted_events(gateway_clien
     stats_response = client.get("/stats", headers=operator_headers())
     assert stats_response.status_code == 200
     stats = stats_response.json()
-    assert stats["total_requests"] == 20
+    assert stats["total_requests"] == 21
     assert stats["blocked"] == 1
     assert stats["anomaly_alerts"] == 1
     assert stats["ml_models"] == 1
     assert stats["detection_categories"]["SQL injection"] == 1
     assert stats["detection_categories"]["Behavioral anomalies"] == 1
-    assert sum(bucket["events"] for bucket in stats["traffic_by_hour"]) == 20
+    assert sum(bucket["events"] for bucket in stats["traffic_by_hour"]) == 21
 
 
 def test_agent_request_is_pushed_to_authenticated_live_dashboard(gateway_client):

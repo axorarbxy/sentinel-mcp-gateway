@@ -160,6 +160,9 @@ def test_valid_key_sets_identity_and_ignores_spoofed_agent_id(gateway_client, mo
         "status": "active",
         "allowed_tools": ["filesystem.read"],
         "risk_level": "low",
+        "upstream_url": None,
+        "upstream_name": None,
+        "upstream_token_env": None,
     }
 
     response = client.post(
