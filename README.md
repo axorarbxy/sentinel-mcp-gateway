@@ -628,3 +628,58 @@ curl -i -X POST http://localhost:8001/mcp/proxy \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"not-allowed","arguments":{}}}'
 ```
+
+## Standalone CyberEye workspace MCP service
+
+`backend.cybereye_mcp_server:app` is a separate, workspace-scoped MCP service
+on port 9001. It is independent of the main gateway and requires its own
+operator JWTs. It binds to localhost by default. Keep it behind a TLS-terminating
+reverse proxy before allowing network access.
+
+Configure its environment before starting the service. Generate a random secret
+of at least 32 bytes and set the workspace and approval database to dedicated
+paths. The approval database should be outside the exposed workspace.
+
+```powershell
+$env:CYBEREYE_ENVIRONMENT = 'development'
+$env:CYBEREYE_JWT_SECRET = '<random secret of at least 32 bytes>'
+$env:CYBEREYE_WORKSPACE_ROOT = 'R:\CyberEyeWorkspace'
+$env:CYBEREYE_APPROVAL_DB = 'R:\CyberEyeData\approvals.sqlite3'
+$env:CYBEREYE_TOKEN_TTL_SECONDS = '900'
+$env:CYBEREYE_APPROVAL_TTL_SECONDS = '1800'
+python -m uvicorn backend.cybereye_mcp_server:app --host 127.0.0.1 --port 9001
+```
+
+Issue a short-lived, least-privilege token from a trusted local process with the
+same JWT secret, issuer, and audience as the service. The helper defaults to
+read-only scope; request only the permissions the operator needs.
+
+```python
+from backend.cybereye_mcp_server import generate_operator_token
+
+print(generate_operator_token(scopes=["cybereye:read"], subject="operator-1"))
+```
+
+Supported scopes are `cybereye:read`, `cybereye:write`, `cybereye:approve`, and
+`cybereye:reject`. Mutation requests are bound to the canonical workspace path
+and exact UTF-8 contents. A different operator must approve the pending request;
+the writer must then present its approval ID. The approval is consumed atomically
+and cannot be replayed. Approval records persist in SQLite and expire after the
+configured TTL. Use distinct subjects for requesters, approvers, and executors.
+
+Production startup requires `CYBEREYE_ENVIRONMENT=production`, an explicit JWT
+secret, an absolute workspace root, and a persistent approval database. Demo
+authentication is disabled by default and is rejected in production. The
+standalone service applies request-size and per-process IP rate limits. If it is
+run with multiple workers, also apply rate limits and access controls at the
+reverse proxy. Set `CYBEREYE_DEMO_AUTH=true` only for isolated local experiments;
+it creates an ephemeral signing secret and does not provide durable operator
+tokens.
+
+File content, tool arguments, and search results are untrusted data. Regex-based
+prompt-injection matching is only a display aid and is not a security boundary.
+Reads and writes are UTF-8 text only, capped at 1 MiB; recursive search is
+bounded by depth, file count, and bytes. Symbolic links and credential/repository
+metadata paths are rejected or omitted. Platform filesystem semantics still
+matter: keep the workspace owned by a dedicated service account and prevent
+other local users from changing its directory tree while the service runs.
