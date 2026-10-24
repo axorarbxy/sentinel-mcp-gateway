@@ -214,6 +214,25 @@ async def default_decision_hook(event: InterceptionEvent, agent: dict[str, Any])
             "Outbound tool call blocked after upstream tool data was returned in this MCP session",
             ["DATA-EXFIL-TAINT"],
         )
+    untrusted_data_sensitive_tools = agent.get("untrusted_data_sensitive_tools", [])
+    if event.method == "tools/call" and agent.get("session_untrusted_data") is True:
+        if not isinstance(untrusted_data_sensitive_tools, list) or any(
+            not isinstance(name, str) or not name.strip()
+            for name in untrusted_data_sensitive_tools
+        ):
+            event.decision_source = "runtime-policy"
+            return Decision(
+                "block",
+                "Untrusted-data tool policy is invalid; sensitive tool calls fail closed",
+                ["UNTRUSTED-DATA-POLICY-CONFIG"],
+            )
+        if event.tool_name in untrusted_data_sensitive_tools:
+            event.decision_source = "runtime-policy"
+            return Decision(
+                "block",
+                "Sensitive tool call blocked after upstream tool data was returned in this MCP session",
+                ["UNTRUSTED-DATA-SENSITIVE-TOOL"],
+            )
     if event.method in _SERVER_TO_CLIENT_METHODS or event.method.startswith(("sampling/", "roots/", "elicitation/")):
         return Decision("block", "Server-to-client method is invalid in an agent request", ["BASE-METHOD-DIRECTION"])
     if event.method not in _KNOWN_METHODS and UNKNOWN_METHOD_MODE == "strict":

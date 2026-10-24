@@ -961,6 +961,7 @@ async def verify_agent_api_key(api_key: str, source_ip: str):
                     "upstream_token_env": agent_metadata.get("upstream_token_env"),
                     "egress_tools": agent_metadata.get("egress_tools", []),
                     "trusted_egress_tools": agent_metadata.get("trusted_egress_tools", []),
+                    "untrusted_data_sensitive_tools": agent_metadata.get("untrusted_data_sensitive_tools", []),
                 }
                 now = time.monotonic()
                 should_update_seen = now - last_seen_write_at.get(agent.id, 0.0) >= 60
