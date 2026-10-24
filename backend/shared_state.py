@@ -51,6 +51,7 @@ class InMemorySharedState:
         self._buckets: dict[str, deque[tuple[float, str | None]]] = defaultdict(deque)
         self._tickets: dict[str, tuple[float, int]] = {}
         self._sessions: dict[str, tuple[int, str, float]] = {}
+        self._untrusted_sessions: dict[str, float] = {}
         self._claims: dict[str, tuple[str, float]] = {}
         self._subscribers: set[asyncio.Queue[str]] = set()
         self._event_stream_queues: dict[str, asyncio.Queue[tuple[str, dict[str, Any]]]] = {}
@@ -74,6 +75,7 @@ class InMemorySharedState:
             self._buckets.clear()
             self._tickets.clear()
             self._sessions.clear()
+            self._untrusted_sessions.clear()
             self._claims.clear()
             self._event_windows.clear()
             self._event_dedup.clear()
@@ -163,6 +165,24 @@ class InMemorySharedState:
             if current[0] != agent_id or current[1] != upstream_scope:
                 return False
             self._sessions[session_id] = (agent_id, upstream_scope, now + ttl_seconds)
+            return True
+
+    async def mark_session_untrusted_result(self, session_id: str, agent_id: int, ttl_seconds: int) -> None:
+        key = f"{agent_id}:{session_id}"
+        with self._lock:
+            self._untrusted_sessions[key] = time.monotonic() + max(1, ttl_seconds)
+
+    async def has_session_untrusted_result(self, session_id: str, agent_id: int, ttl_seconds: int) -> bool:
+        key = f"{agent_id}:{session_id}"
+        now = time.monotonic()
+        with self._lock:
+            expires_at = self._untrusted_sessions.get(key)
+            if expires_at is None:
+                return False
+            if expires_at <= now:
+                self._untrusted_sessions.pop(key, None)
+                return False
+            self._untrusted_sessions[key] = now + max(1, ttl_seconds)
             return True
 
     async def claim_requests(self, request_keys: Sequence[str], worker_id: str, lease_seconds: int) -> bool:
@@ -536,6 +556,26 @@ class RedisSharedState:
             ))
         except Exception as exc:
             raise SharedStateUnavailable("Redis session validation failed") from exc
+
+    async def mark_session_untrusted_result(self, session_id: str, agent_id: int, ttl_seconds: int) -> None:
+        try:
+            await self._redis.set(
+                _stable_key("mcp-untrusted-session", f"{agent_id}:{session_id}"),
+                "1", ex=max(1, ttl_seconds),
+            )
+        except Exception as exc:
+            raise SharedStateUnavailable("Redis untrusted-session marker update failed") from exc
+
+    async def has_session_untrusted_result(self, session_id: str, agent_id: int, ttl_seconds: int) -> bool:
+        try:
+            key = _stable_key("mcp-untrusted-session", f"{agent_id}:{session_id}")
+            value = await self._redis.get(key)
+            if value == "1":
+                await self._redis.expire(key, max(1, ttl_seconds))
+                return True
+            return False
+        except Exception as exc:
+            raise SharedStateUnavailable("Redis untrusted-session marker lookup failed") from exc
 
     async def claim_requests(self, request_keys: Sequence[str], worker_id: str, lease_seconds: int) -> bool:
         redis_keys = [_stable_key("request-claim", key) for key in request_keys]

@@ -314,6 +314,40 @@ Unicode-normalized collisions), nesting depth, payload size, and batch size.
 JSON-RPC notifications receive HTTP 202 when accepted. Invalid messages are
 rejected before upstream forwarding.
 
+### Runtime policy enforcement
+
+The proxy applies deterministic checks at the tool-call boundary, before a
+request reaches its upstream:
+
+- Path arguments are recursively inspected after Unicode normalization and
+  repeated URL decoding, so encoded parent-directory traversal is blocked.
+- Tool calls have an additional per-agent, per-tool sliding-window limit. Set
+  `SENTINEL_MCP_TOOL_RATE_LIMIT_REQUESTS` and
+  `SENTINEL_MCP_TOOL_RATE_LIMIT_WINDOW_SECONDS` to tune it. It uses the shared
+  state backend so the limit applies across workers.
+- Successful tool results are treated as untrusted input for the rest of that
+  MCP session. A session marker is stored, never the result contents. Later
+  calls to recognized outbound tools (for example, email, upload, webhook,
+  publish, or share tools) are blocked before forwarding. Results containing
+  credential or personal-data fields are also labeled in the audit event. The
+  marker expires with the MCP session lifetime and is refreshed while the
+  session remains active.
+
+Custom outbound tools can be tagged through agent metadata with
+`{"egress_tools":["custom.export"]}`. A narrowly scoped exception for a
+reviewed sink can be configured with `{"trusted_egress_tools":["custom.export"]}`.
+This trusts the named tool to receive data from the session; grant it only to
+tools and agents that need it. Include other existing metadata when updating
+an agent.
+
+This is a conservative runtime guard, not a complete information-flow proof:
+it blocks outbound calls after any successful tool result, which may interrupt
+legitimate multi-step workflows. Tool-name detection needs operator
+configuration for custom sinks. MCP session taint requires an upstream-issued
+session ID; stateless upstreams do not get cross-call taint tracking. Keep
+explicit `allowed_tools` lists and upstream-side authorization in place as
+additional controls.
+
 ### Configure an upstream
 
 Configure an optional default upstream in the gateway environment. Operators

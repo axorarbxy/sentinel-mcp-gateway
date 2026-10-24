@@ -163,6 +163,8 @@ def test_valid_key_sets_identity_and_ignores_spoofed_agent_id(gateway_client, mo
         "upstream_url": None,
         "upstream_name": None,
         "upstream_token_env": None,
+        "egress_tools": [],
+        "trusted_egress_tools": [],
     }
 
     response = client.post(

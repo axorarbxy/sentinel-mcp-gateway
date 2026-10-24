@@ -6,9 +6,11 @@ on intercepted MCP tool calls.
 
 import os
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
+from urllib.parse import unquote
 
 
 # ---------- Result object returned by every policy check ----------
@@ -57,11 +59,31 @@ SENSITIVE_PATHS = [
 ]
 
 PATH_TRAVERSAL_PATTERNS = [
-    r"\.\./",          # ../
-    r"\.\.\\",         # ..\
-    r"%2e%2e",         # URL-encoded ..
-    r"\x00",           # null byte injection
+    r"(?:^|/)\.\.(?:/|$)",  # parent segment after separator normalization
+    r"\x00",                  # null byte injection
 ]
+
+
+def _string_values(value: Any):
+    if isinstance(value, dict):
+        for nested in value.values():
+            yield from _string_values(nested)
+    elif isinstance(value, (list, tuple)):
+        for nested in value:
+            yield from _string_values(nested)
+    elif isinstance(value, str):
+        yield value
+
+
+def _normalize_path_input(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).replace("\x00", "\u0000")
+    # Decode repeatedly to catch double-encoded separators and dot segments.
+    for _ in range(4):
+        decoded = unquote(normalized)
+        if decoded == normalized:
+            break
+        normalized = decoded
+    return normalized.replace("\\", "/").lower()
 
 
 def check_path_traversal(payload: Dict[str, Any]) -> PolicyResult:
@@ -69,27 +91,29 @@ def check_path_traversal(payload: Dict[str, Any]) -> PolicyResult:
     Scans tool call arguments for sensitive paths or traversal attempts.
     """
     args = payload.get("params", {}).get("arguments", {}) or {}
-    blob = str(args).lower()
+    normalized_values = [_normalize_path_input(value) for value in _string_values(args)]
 
-    for pattern in PATH_TRAVERSAL_PATTERNS:
-        if re.search(pattern, blob):
+    for value in normalized_values:
+        if (
+            any(re.search(pattern, value) for pattern in PATH_TRAVERSAL_PATTERNS)
+            or re.search(r"%(?:25)*(?:2e|2f|5c|00)", value, re.IGNORECASE)
+        ):
             return PolicyResult(
                 allowed=False,
                 rule="PATH_TRAVERSAL",
-                reason=f"Traversal pattern detected: {pattern}",
+                reason="Parent traversal or null-byte path input detected",
                 severity="high",
-                metadata={"pattern": pattern, "args": args},
+                metadata={},
             )
-
-    for sensitive in SENSITIVE_PATHS:
-        if sensitive.lower() in blob:
-            return PolicyResult(
-                allowed=False,
-                rule="SENSITIVE_PATH_ACCESS",
-                reason=f"Attempt to access sensitive path: {sensitive}",
-                severity="critical",
-                metadata={"path": sensitive, "args": args},
-            )
+        for sensitive in SENSITIVE_PATHS:
+            if sensitive.lower().replace("\\", "/") in value:
+                return PolicyResult(
+                    allowed=False,
+                    rule="SENSITIVE_PATH_ACCESS",
+                    reason="Attempt to access a sensitive system path",
+                    severity="critical",
+                    metadata={},
+                )
 
     return PolicyResult(
         allowed=True,

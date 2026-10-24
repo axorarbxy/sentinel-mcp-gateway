@@ -36,6 +36,8 @@ MAX_EVENT_PAYLOAD_BYTES = 16_384
 MAX_CONCURRENT_PER_AGENT = 20
 MAX_CONCURRENT_PER_SESSION = 8
 MAX_GLOBAL_UPSTREAM_REQUESTS = 200
+TOOL_RATE_LIMIT_REQUESTS = max(1, int(os.getenv("SENTINEL_MCP_TOOL_RATE_LIMIT_REQUESTS", "30")))
+TOOL_RATE_LIMIT_WINDOW_SECONDS = max(1, int(os.getenv("SENTINEL_MCP_TOOL_RATE_LIMIT_WINDOW_SECONDS", "60")))
 EVALUATOR_TIMEOUT_SECONDS = 0.25
 UPSTREAM_TIMEOUT_SECONDS = float(os.getenv("SENTINEL_MCP_UPSTREAM_TIMEOUT_SECONDS", "30"))
 UPSTREAM_URL = os.getenv("SENTINEL_MCP_UPSTREAM_URL", "").strip()
@@ -70,6 +72,20 @@ _SECRET_VALUE_RE = re.compile(
 )
 _SECRET_FIELD_RE = re.compile(
     r"(?i)(password|passwd|secret|token|credential|api[_-]?key|authorization|private[_-]?key)"
+)
+_SENSITIVE_DATA_FIELD_RE = re.compile(
+    r"(?i)(password|passwd|secret|token|credential|api[_-]?key|authorization|private[_-]?key|"
+    r"ssn|social.?security|credit.?card|card.?number|account.?number|email|patient|customer|"
+    r"personal.?data|date.?of.?birth|birth.?date)"
+)
+_SENSITIVE_VALUE_RE = re.compile(
+    r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b|"
+    r"\b\d{3}-\d{2}-\d{4}\b|"
+    r"\b(?:cye_(?:live|test)_|sk_sentinel_)[A-Za-z0-9_-]{12,}\b"
+)
+_EGRESS_TOOL_RE = re.compile(
+    r"(?i)(^|[._/-])(send|email|mail|upload|publish|post|webhook|http|request|share|export|"
+    r"transfer|slack|discord|telegram|sms|notify)([._/-]|$)"
 )
 _TOOL_NAME_RE = re.compile(r"^[^\s\x00-\x1f\x7f]{1,255}$")
 _KNOWN_METHODS = {
@@ -141,6 +157,40 @@ class InterceptionEvent:
     decision_source: str = "rule"
 
 
+def _contains_sensitive_value(value: Any) -> bool:
+    if isinstance(value, dict):
+        return any(_contains_sensitive_value(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_sensitive_value(item) for item in value)
+    if isinstance(value, str):
+        return bool(value.strip()) and value.strip().lower() not in {"[redacted]", "unknown", "null"}
+    return value is not None
+
+
+def _response_contains_sensitive_data(value: Any) -> bool:
+    """Conservatively label upstream response data using field names and common identifiers."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if _SENSITIVE_DATA_FIELD_RE.search(str(key)) and _contains_sensitive_value(item):
+                return True
+            if _response_contains_sensitive_data(item):
+                return True
+    elif isinstance(value, (list, tuple)):
+        return any(_response_contains_sensitive_data(item) for item in value)
+    elif isinstance(value, str):
+        return bool(_SENSITIVE_VALUE_RE.search(value))
+    return False
+
+
+def _is_egress_tool(tool_name: str | None, agent: dict[str, Any]) -> bool:
+    if not tool_name:
+        return False
+    configured_sinks = agent.get("egress_tools", [])
+    if isinstance(configured_sinks, list) and tool_name in configured_sinks:
+        return True
+    return bool(_EGRESS_TOOL_RE.search(tool_name))
+
+
 async def default_decision_hook(event: InterceptionEvent, agent: dict[str, Any]) -> Decision:
     """Baseline enforcement only; policy and anomaly evaluators plug in here later."""
     try:
@@ -151,6 +201,19 @@ async def default_decision_hook(event: InterceptionEvent, agent: dict[str, Any])
     allowed_tools = agent.get("allowed_tools") or []
     if event.method == "tools/call" and allowed_tools and event.tool_name not in allowed_tools:
         return Decision("block", "Tool is not in the agent's allowed_tools list", ["BASE-ALLOWED-TOOLS"])
+    trusted_egress_tools = agent.get("trusted_egress_tools", [])
+    if (
+        event.method == "tools/call"
+        and agent.get("session_untrusted_data") is True
+        and _is_egress_tool(event.tool_name, agent)
+        and not (isinstance(trusted_egress_tools, list) and event.tool_name in trusted_egress_tools)
+    ):
+        event.decision_source = "runtime-policy"
+        return Decision(
+            "block",
+            "Outbound tool call blocked after upstream tool data was returned in this MCP session",
+            ["DATA-EXFIL-TAINT"],
+        )
     if event.method in _SERVER_TO_CLIENT_METHODS or event.method.startswith(("sampling/", "roots/", "elicitation/")):
         return Decision("block", "Server-to-client method is invalid in an agent request", ["BASE-METHOD-DIRECTION"])
     if event.method not in _KNOWN_METHODS and UNKNOWN_METHOD_MODE == "strict":
@@ -675,6 +738,10 @@ def _upstream_session_scope(url: str, name: str) -> str:
 
 
 async def _persist_and_emit(event: InterceptionEvent, emit_event: Callable[[dict[str, Any]], Awaitable[None]] | None) -> None:
+    if event.payload.get("untrusted_result_observed") is True and event.session_id:
+        await get_shared_state().mark_session_untrusted_result(
+            event.session_id, event.agent_id, MCP_SESSION_TTL_SECONDS,
+        )
     event_payload = _redact(asdict(event))
     payload_hash, payload_json = _payload_for_event({
         "arguments": event.arguments,
@@ -903,7 +970,12 @@ def _mark_response_events(
             event.response_status = "success"
         else:
             event.response_status = "error" if "error" in response else "success"
-            event.payload["response"] = response.get("result", response.get("error"))
+            response_data = response.get("result", response.get("error"))
+            event.payload["response"] = response_data
+            if event.method == "tools/call" and "error" not in response:
+                event.payload["untrusted_result_observed"] = True
+                if _response_contains_sensitive_data(response_data):
+                    event.payload["sensitive_result_observed"] = True
         event.response_size_bytes = size
 
 
@@ -1197,6 +1269,16 @@ async def _forward(
                     )
                 except asyncio.CancelledError:
                     raise
+                except SharedStateUnavailable:
+                    logger.exception("MCP runtime policy state unavailable; suppressing upstream result")
+                    event.decision = "block"
+                    event.decision_reason = "MCP runtime policy state unavailable; upstream result suppressed"
+                    event.matched_rule_ids.append("RUNTIME-POLICY-STATE-UNAVAILABLE")
+                    event.response_status = "error"
+                    event.payload.pop("untrusted_result_observed", None)
+                    await _persist_and_emit(event, emit_event)
+                    await client.aclose()
+                    return _error_http(503, "MCP runtime policy state unavailable", message.get("id"))
                 except (httpx.HTTPError, PayloadLimitExceeded, InvalidJSONRPC, ValueError, TimeoutError):
                     logger.error("MCP upstream request failed upstream=%s", upstream_name)
                     event.response_status = "error"
@@ -1283,6 +1365,19 @@ async def _forward(
                     if not all_replies:
                         return Response(status_code=202)
                     return JSONResponse(all_replies)
+                except SharedStateUnavailable:
+                    logger.exception("MCP runtime policy state unavailable; suppressing batch results")
+                    for _, event in allowed:
+                        event.decision = "block"
+                        event.decision_reason = "MCP runtime policy state unavailable; upstream result suppressed"
+                        event.matched_rule_ids.append("RUNTIME-POLICY-STATE-UNAVAILABLE")
+                        event.response_status = "error"
+                        event.payload.pop("untrusted_result_observed", None)
+                        await _persist_and_emit(event, emit_event)
+                    for _, event in blocked:
+                        event.response_status = "error"
+                        await _persist_and_emit(event, emit_event)
+                    return _error_http(503, "MCP runtime policy state unavailable")
                 except (httpx.HTTPError, PayloadLimitExceeded, InvalidJSONRPC, ValueError, TimeoutError):
                     logger.error("MCP upstream batch request failed upstream=%s", upstream_name)
                     for _, event in allowed:
@@ -1449,7 +1544,41 @@ async def intercept_request(
         except InvalidJSONRPC as exc:
             await _persist_and_emit(invalid_event("Invalid JSON-RPC method parameters"), emit_event)
             return _error_http(400, str(exc), message.get("id"))
-        decision = await _evaluate(event, agent)
+        decision_agent = agent
+        decision: Decision
+        if event.method == "tools/call":
+            state = get_shared_state()
+            try:
+                within_tool_limit = await state.consume_rate_limit(
+                    [("agent-tool", f"{agent_id}:{event.tool_name or ''}")],
+                    TOOL_RATE_LIMIT_REQUESTS,
+                    TOOL_RATE_LIMIT_WINDOW_SECONDS,
+                )
+                session_untrusted = bool(
+                    session_id and await state.has_session_untrusted_result(
+                        session_id, agent_id, MCP_SESSION_TTL_SECONDS,
+                    )
+                )
+            except SharedStateUnavailable:
+                logger.exception("Shared state unavailable while enforcing MCP runtime policies")
+                within_tool_limit = False
+                session_untrusted = False
+                decision = Decision(
+                    "block", "MCP runtime policy state is unavailable", ["RUNTIME-POLICY-STATE-UNAVAILABLE"],
+                )
+                event.decision_source = "runtime-policy"
+            else:
+                if not within_tool_limit:
+                    decision = Decision(
+                        "block", "Per-tool request rate limit exceeded", ["TOOL-RATE-LIMIT"],
+                    )
+                    event.decision_source = "runtime-policy"
+                else:
+                    if session_untrusted:
+                        decision_agent = {**agent, "session_untrusted_data": True}
+                    decision = await _evaluate(event, decision_agent)
+        else:
+            decision = await _evaluate(event, agent)
         event.decision = decision.action
         event.decision_reason = decision.reason
         event.matched_rule_ids = list(decision.rule_ids)
