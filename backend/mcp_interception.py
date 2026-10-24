@@ -374,10 +374,16 @@ def _validate_protocol_version(request: Request, messages: list[dict[str, Any]])
 
 
 def _validate_upstream_response(payload: Any, expected_id: Any) -> None:
+    response_id = payload.get("id") if isinstance(payload, dict) else None
     if (
         not isinstance(payload, dict)
         or payload.get("jsonrpc") != "2.0"
-        or payload.get("id") != expected_id
+        # Python considers True == 1 and 1.0 == 1. JSON-RPC IDs are
+        # string or integer values here, and their types are significant.
+        or isinstance(response_id, bool)
+        or not isinstance(response_id, (str, int))
+        or type(response_id) is not type(expected_id)
+        or response_id != expected_id
         or ("result" in payload) == ("error" in payload)
     ):
         raise InvalidJSONRPC("Upstream returned an invalid JSON-RPC response")
@@ -1222,7 +1228,9 @@ async def _forward(
                             if response.status_code >= 400:
                                 raise httpx.HTTPStatusError("upstream rejected batch member", request=response.request, response=response)
                             if response.status_code == 202:
-                                    return None, 0
+                                if "id" in message:
+                                    raise ValueError("upstream returned 202 for a request that expects a response")
+                                return None, 0
                             if response.headers.get("content-type", "").lower().startswith("text/event-stream"):
                                 raise ValueError("SSE responses for batched requests are unsupported")
                             if not response.headers.get("content-type", "").lower().startswith("application/json"):
