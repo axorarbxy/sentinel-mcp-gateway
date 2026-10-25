@@ -1,40 +1,97 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap');
+
+@font-face {
+  font-family: 'Open Sauce One';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('https://cdn.jsdelivr.net/fontsource/fonts/open-sauce-one@5.3.0/latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Peace Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('https://assets.fontdiff.com/webfonts/peace-sans-regular.woff2') format('woff2');
+}
 
 :root {
   color-scheme: dark;
-  --canvas: #080d14;
-  --surface: #101822;
-  --surface-raised: #121e2a;
-  --line: rgba(154, 175, 193, .12);
-  --text-muted: #8293a0;
-  --mint: #56e0c3;
+  --canvas: #030407;
+  --surface: #0b1018;
+  --surface-raised: #111a26;
+  --line: rgba(56, 164, 218, .22);
+  --text-muted: #929eae;
+  --cerulean: #28a9e0;
+  --neon-rose: #ff3b78;
+  --bevel-top: rgba(225, 242, 255, .12);
+  --bevel-bottom: rgba(0, 0, 0, .72);
+  --well: #05080d;
 }
-
 * { box-sizing: border-box; }
-
-html { min-width: 360px; background: var(--canvas); }
-
+html { min-width: 360px; min-height: 100%; background: var(--canvas); }
 body {
-  margin: 0;
-  min-width: 360px;
-  min-height: 100vh;
-  color: #f3f7fa;
+  margin: 0; min-width: 360px; min-height: 100vh; color: #edf3fb;
   background:
-    radial-gradient(ellipse at 82% -15%, rgba(30, 136, 121, .1), transparent 35%),
-    var(--canvas);
-  font-family: 'Manrope', Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-feature-settings: 'cv11', 'ss01';
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+    radial-gradient(ellipse at 72% -18%, rgba(0, 126, 190, .18), transparent 43%),
+    radial-gradient(ellipse at 12% 90%, rgba(255, 40, 105, .07), transparent 35%),
+    repeating-linear-gradient(135deg, rgba(255,255,255,.009) 0 1px, transparent 1px 4px),
+    linear-gradient(145deg, #090c12, #030407 62%, #080a10);
+  font-family: 'Open Sauce One', 'Segoe UI', sans-serif;
+  font-feature-settings: 'cv11', 'ss01'; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
 }
-
 button, input, textarea, select { font: inherit; }
-
-::selection { color: #06120f; background: var(--mint); }
-
-::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-track { background: #0a1119; }
-::-webkit-scrollbar-thumb { border: 2px solid #0a1119; border-radius: 12px; background: #314555; }
-::-webkit-scrollbar-thumb:hover { background: #4b6979; }
-
+.MuiTypography-h1, .MuiTypography-h2, .MuiTypography-h3, .MuiTypography-h4, .MuiTypography-h5, .MuiTypography-h6, h1, h2, h3, h4, h5, h6 { font-family: 'Peace Sans', 'Open Sauce One', sans-serif !important; }
+::selection { color: #fff; background: var(--neon-rose); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #05070b; box-shadow: inset 1px 1px 3px #000, inset -1px -1px 2px #111a26; }
+::-webkit-scrollbar-thumb { border: 2px solid #070a0f; border-radius: 12px; background: linear-gradient(90deg,#174365,#10243a); }
+::-webkit-scrollbar-thumb:hover { background: #147daf; }
 code, pre, .mono { font-family: 'DM Mono', 'SFMono-Regular', Consolas, monospace; }
+
+/* Dark machined surfaces with cool highlights and deep inset wells. */
+.MuiPaper-root, .MuiCard-root {
+  background-color: #0b1018 !important;
+  background-image: linear-gradient(145deg, rgba(56,164,218,.055), transparent 42%, rgba(0,0,0,.35)) !important;
+  border: 1px solid rgba(65,147,192,.22) !important;
+  border-top-color: rgba(155,214,245,.22) !important;
+  border-radius: 13px !important;
+  box-shadow: 1px 2px 3px rgba(0,0,0,.65), 5px 7px 17px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.045), inset 0 -1px 0 rgba(0,0,0,.5) !important;
+}
+.MuiCard-root { background-color: #0e1520 !important; }
+.MuiCard-root:hover { border-top-color: rgba(83,190,240,.38) !important; }
+.MuiAppBar-root { background: linear-gradient(180deg, rgba(13,20,30,.98), rgba(5,8,13,.98)) !important; box-shadow: 0 3px 9px rgba(0,0,0,.55), inset 0 -1px rgba(86,173,219,.16) !important; }
+.MuiDrawer-paper { background: linear-gradient(160deg,#0e1621,#05080d 78%) !important; box-shadow: inset -1px 0 rgba(113,186,224,.1), 4px 0 16px rgba(0,0,0,.5) !important; }
+.MuiButton-root, .MuiIconButton-root {
+  border: 1px solid rgba(102,168,205,.24); border-top-color: rgba(190,229,250,.25);
+  border-radius: 9px !important; box-shadow: 0 2px 3px rgba(0,0,0,.52), inset 0 1px rgba(255,255,255,.08), inset 0 -1px rgba(0,0,0,.4);
+  transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
+}
+.MuiButton-root:hover, .MuiIconButton-root:hover { filter: brightness(1.15); box-shadow: 0 3px 5px rgba(0,0,0,.58), inset 0 1px rgba(255,255,255,.12); }
+.MuiButton-root:active, .MuiIconButton-root:active { transform: translateY(1px); box-shadow: inset 0 2px 5px rgba(0,0,0,.5); }
+.MuiButton-contained { background: linear-gradient(180deg,#35b6ed,#087eae) !important; color: #f4fbff !important; text-shadow: 0 1px rgba(0,0,0,.35); }
+.MuiButton-containedSecondary { background: linear-gradient(180deg,#ff6997,#e91e59) !important; color: #fff !important; }
+.MuiButton-outlined { background: linear-gradient(180deg,rgba(255,255,255,.035),rgba(0,0,0,.18)) !important; }
+.MuiInputBase-root, .MuiOutlinedInput-root, .MuiSelect-select, input, textarea, select { background-color: #05090f; border-radius: 8px; }
+.MuiOutlinedInput-root { box-shadow: inset 2px 3px 6px rgba(0,0,0,.58), inset 0 1px rgba(0,0,0,.45); }
+.MuiOutlinedInput-notchedOutline { border-color: rgba(71,145,184,.3) !important; }
+.MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline { border-color: rgba(56,172,224,.62) !important; }
+.Mui-focused .MuiOutlinedInput-notchedOutline { border-width: 1px !important; border-color: #28a9e0 !important; box-shadow: 0 0 0 2px rgba(40,169,224,.16); }
+.MuiChip-root { background: linear-gradient(180deg,rgba(72,152,195,.14),rgba(13,25,38,.8)); box-shadow: inset 0 1px rgba(255,255,255,.06), 0 1px 2px rgba(0,0,0,.36); }
+.MuiTabs-root { border-bottom: 1px solid rgba(75,149,188,.18); }
+.MuiTab-root { border-radius: 7px 7px 0 0 !important; }
+.MuiTableContainer-root { background: linear-gradient(145deg,#0d1520,#070b11) !important; }
+.MuiTableCell-root { border-bottom-color: rgba(74,136,169,.16) !important; }
+.MuiTableHead-root .MuiTableCell-root { background: linear-gradient(180deg,#17283a,#101a28); color: #e7f4fc; text-shadow: 0 1px rgba(0,0,0,.7); }
+.MuiTableBody-root .MuiTableRow-root:hover { background: rgba(31,149,205,.08); }
+.MuiSwitch-track { background-color: #05090f !important; box-shadow: inset 1px 2px 4px rgba(0,0,0,.72); }
+.MuiSwitch-thumb { background: linear-gradient(145deg,#dceaf1,#66798a) !important; box-shadow: 1px 2px 4px rgba(0,0,0,.65) !important; }
+.MuiSlider-rail, .MuiLinearProgress-root { background-color: #05090f !important; box-shadow: inset 0 1px 3px rgba(0,0,0,.7); }
+.MuiAccordion-root { background: linear-gradient(145deg,#0e1722,#070b11) !important; }
+.MuiDialog-paper { background: linear-gradient(145deg,#111c29,#070b11) !important; }
+.MuiTooltip-tooltip { background: #dceef8 !important; color: #08111a !important; box-shadow: 0 3px 10px rgba(0,0,0,.6) !important; }
+.MuiDivider-root { border-color: rgba(72,137,171,.2) !important; }
+.Mui-error { color: #ff3b78 !important; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
+
+

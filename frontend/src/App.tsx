@@ -1,5 +1,6 @@
 // App.tsx
 import React, { useState, useEffect } from 'react';
+import './index.css';
 import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { ThemeProvider, createTheme, CssBaseline, AppBar, Toolbar, Typography, Box, Button, Drawer, List, ListItemButton, ListItemIcon, ListItemText, Divider, IconButton, useMediaQuery } from '@mui/material';
 import {
@@ -40,39 +41,40 @@ import AndroidModule from './pages/modules/AndroidModule';
 import SQLiPolicies from './pages/SQLiPolicies';
 
 const darkTheme = createTheme({
+  typography: { fontFamily: "'Open Sauce One', 'Segoe UI', sans-serif" },
   palette: {
     mode: 'dark',
-    primary: { main: '#56E0C3', light: '#A1F3DF', dark: '#1D9F8C', contrastText: '#07130F' },
-    secondary: { main: '#A99BFF', contrastText: '#0C1020' },
-    background: { default: '#080D14', paper: '#101822' },
-    text: { primary: '#F3F7FA', secondary: '#9BAAB7' },
+    primary: { main: '#28A9E0', light: '#91DFFF', dark: '#087EAE', contrastText: '#F4FBFF' },
+    secondary: { main: '#FF3B78', contrastText: '#FFFFFF' },
+    background: { default: '#030407', paper: '#0B1018' },
+    text: { primary: '#EDF3FB', secondary: '#929EAE' },
   },
   components: {
     MuiLink: {
       styleOverrides: {
-        root: { color: '#56E0C3' },
+        root: { color: '#28A9E0' },
       },
     },
     MuiTab: {
       styleOverrides: {
         root: {
-          '&.Mui-selected': { color: '#56E0C3' },
+          '&.Mui-selected': { color: '#28A9E0' },
         },
       },
     },
     MuiButton: {
       styleOverrides: {
         root: { borderRadius: 10, textTransform: 'none', fontWeight: 700 },
-        outlined: { color: '#56E0C3', borderColor: 'rgba(86, 224, 195, 0.4)' },
+        outlined: { color: '#28A9E0', borderColor: 'rgba(40, 169, 224, 0.48)' },
       },
     },
     MuiSvgIcon: {
       styleOverrides: {
-        colorPrimary: { color: '#56E0C3' },
+        colorPrimary: { color: '#28A9E0' },
       },
     },
-    MuiPaper: { styleOverrides: { root: { backgroundImage: 'none', border: '1px solid rgba(154, 175, 193, 0.11)', borderRadius: 16 } } },
-    MuiCard: { styleOverrides: { root: { backgroundImage: 'linear-gradient(145deg, rgba(18, 29, 41, .98), rgba(13, 21, 31, .98))', border: '1px solid rgba(154, 175, 193, 0.12)', borderRadius: 16 } } },
+    MuiPaper: { styleOverrides: { root: { backgroundImage: 'none', border: '1px solid rgba(65, 147, 192, 0.22)', borderRadius: 16 } } },
+    MuiCard: { styleOverrides: { root: { backgroundImage: 'linear-gradient(145deg, rgba(14, 21, 32, .98), rgba(7, 11, 17, .98))', border: '1px solid rgba(154, 175, 193, 0.12)', borderRadius: 16 } } },
   },
 });
 
@@ -130,9 +132,9 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     switch (systemStatus) {
       case 'active':
         return {
-          color: '#4caf50',
-          bg: 'rgba(76, 175, 80, 0.1)',
-          border: 'rgba(76, 175, 80, 0.3)',
+          color: '#28A9E0',
+          bg: 'rgba(40, 169, 224, 0.1)',
+          border: 'rgba(40, 169, 224, 0.38)',
           label: 'PROTECTION ACTIVE',
         };
       case 'degraded':
@@ -144,9 +146,9 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         };
       case 'critical':
         return {
-          color: '#f44336',
-          bg: 'rgba(244, 67, 54, 0.1)',
-          border: 'rgba(244, 67, 54, 0.3)',
+          color: '#FF3B78',
+          bg: 'rgba(255, 59, 120, 0.1)',
+          border: 'rgba(255, 59, 120, 0.38)',
           label: 'OFFLINE',
         };
     }
@@ -166,7 +168,7 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const drawer = (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', px: 2, py: 2.5 }}>
       <Box onClick={() => navigate('/dashboard')} sx={{ display: 'flex', alignItems: 'center', gap: 1.4, px: 1.2, mb: 4, cursor: 'pointer' }}>
-        <Box sx={{ width: 40, height: 40, display: 'grid', placeItems: 'center', borderRadius: 2.5, color: '#07130F', background: 'linear-gradient(135deg, #76F0D0, #39BDA6)', boxShadow: '0 8px 24px rgba(57,189,166,.2)' }}><SecurityIcon /></Box>
+        <Box sx={{ width: 40, height: 40, display: 'grid', placeItems: 'center', borderRadius: 2.5, color: '#07130F', background: 'linear-gradient(135deg, #64CEFF, #087EAE)', boxShadow: '0 8px 24px rgba(8,126,174,.2)' }}><SecurityIcon /></Box>
         <Box><Typography sx={{ fontWeight: 900, letterSpacing: 1.1, lineHeight: 1.1 }}>CYBEREYE</Typography><Typography sx={{ color: '#718494', fontSize: 10, letterSpacing: 2.2, mt: .5 }}>SENTINEL PLATFORM</Typography></Box>
       </Box>
       {navGroups.map((group) => <Box key={group.label} sx={{ mb: 2.8 }}>
@@ -174,32 +176,32 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         <List disablePadding>
           {group.items.map((item) => {
             const selected = item.path === location.pathname || (item.path !== '/dashboard' && location.pathname.startsWith(item.path));
-            return <ListItemButton key={item.path} selected={selected} onClick={() => { navigate(item.path); setMobileOpen(false); }} sx={{ mb: .35, px: 1.5, py: 1.15, borderRadius: 2.5, color: selected ? '#EAFBF7' : '#93A3B1', '& .MuiListItemIcon-root': { minWidth: 38, color: selected ? '#56E0C3' : '#64798A' }, '&.Mui-selected': { background: 'linear-gradient(90deg, rgba(86,224,195,.16), rgba(86,224,195,.035))', boxShadow: 'inset 2px 0 #56E0C3' }, '&.Mui-selected:hover': { background: 'rgba(86,224,195,.18)' }, '&:hover': { color: '#F3F7FA', backgroundColor: 'rgba(255,255,255,.035)' } }}>
-              <ListItemIcon>{item.icon}</ListItemIcon><ListItemText primary={item.label} slotProps={{ primary: { sx: { fontSize: 13, fontWeight: selected ? 750 : 550 } } }} />{selected && <Box sx={{ width: 5, height: 5, bgcolor: '#56E0C3', borderRadius: '50%', boxShadow: '0 0 12px #56E0C3' }} />}
+            return <ListItemButton key={item.path} selected={selected} onClick={() => { navigate(item.path); setMobileOpen(false); }} sx={{ mb: .35, px: 1.5, py: 1.15, borderRadius: 2.5, color: selected ? '#F0F7FB' : '#929EAE', '& .MuiListItemIcon-root': { minWidth: 38, color: selected ? '#28A9E0' : '#587083' }, '&.Mui-selected': { background: 'linear-gradient(180deg, rgba(40,169,224,.15), rgba(40,169,224,.045))', boxShadow: 'inset 0 1px rgba(255,255,255,.08), inset 0 -1px rgba(0,0,0,.2)' }, '&.Mui-selected:hover': { background: 'rgba(40,169,224,.18)' }, '&:hover': { color: '#F3F7FA', backgroundColor: 'rgba(255,255,255,.035)' } }}>
+              <ListItemIcon>{item.icon}</ListItemIcon><ListItemText primary={item.label} slotProps={{ primary: { sx: { fontSize: 13, fontWeight: selected ? 750 : 550 } } }} />{selected && <Box sx={{ width: 5, height: 5, bgcolor: '#28A9E0', borderRadius: '50%', boxShadow: '0 0 12px #28A9E0' }} />}
             </ListItemButton>;
           })}
         </List>
       </Box>)}
-      <Box sx={{ mt: 'auto', p: 1.5, border: '1px solid rgba(154,175,193,.12)', borderRadius: 3, background: 'linear-gradient(145deg, rgba(19,31,42,.9), rgba(12,20,29,.85))' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: .8 }}><InsightsIcon sx={{ fontSize: 17, color: '#56E0C3' }} /><Typography sx={{ fontSize: 11, fontWeight: 800 }}>Gateway telemetry</Typography></Box>
-        <Typography sx={{ color: '#8293A0', fontSize: 11, lineHeight: 1.6 }}>Live inspection for agent traffic and security signals.</Typography>
-        <Divider sx={{ my: 1.2, borderColor: 'rgba(154,175,193,.12)' }} />
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><Typography sx={{ color: '#758795', fontSize: 10, fontFamily: 'monospace' }}>API · :8001</Typography><Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: statusConfig.color, boxShadow: `0 0 10px ${statusConfig.color}` }} /></Box>
+      <Box sx={{ mt: 'auto', p: 1.5, border: '1px solid rgba(65,147,192,.22)', borderRadius: 3, background: 'linear-gradient(145deg, rgba(17,30,44,.95), rgba(6,11,18,.95))' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: .8 }}><InsightsIcon sx={{ fontSize: 17, color: '#28A9E0' }} /><Typography sx={{ fontSize: 11, fontWeight: 800 }}>Gateway telemetry</Typography></Box>
+        <Typography sx={{ color: '#929EAE', fontSize: 11, lineHeight: 1.6 }}>Live inspection for agent traffic and security signals.</Typography>
+        <Divider sx={{ my: 1.2, borderColor: 'rgba(65,147,192,.22)' }} />
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><Typography sx={{ color: '#7E91A3', fontSize: 10, fontFamily: 'monospace' }}>API · :8001</Typography><Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: statusConfig.color, boxShadow: `0 0 10px ${statusConfig.color}` }} /></Box>
       </Box>
     </Box>
   );
 
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', color: 'text.primary', background: 'radial-gradient(ellipse at 76% -12%, rgba(29,159,140,.10), transparent 32%), #080D14' }}>
-      <Drawer variant={desktop ? 'permanent' : 'temporary'} open={desktop || mobileOpen} onClose={() => setMobileOpen(false)} ModalProps={{ keepMounted: true }} sx={{ width: { md: 264 }, flexShrink: 0, '& .MuiDrawer-paper': { width: 264, boxSizing: 'border-box', bgcolor: '#0A1119', border: 0, borderRight: '1px solid rgba(154,175,193,.1)' } }}>{drawer}</Drawer>
+    <Box sx={{ minHeight: '100vh', display: 'flex', color: 'text.primary', background: 'radial-gradient(ellipse at 76% -12%, rgba(0,126,190,.18), transparent 32%), #030407' }}>
+      <Drawer variant={desktop ? 'permanent' : 'temporary'} open={desktop || mobileOpen} onClose={() => setMobileOpen(false)} ModalProps={{ keepMounted: true }} sx={{ width: { md: 264 }, flexShrink: 0, '& .MuiDrawer-paper': { width: 264, boxSizing: 'border-box', bgcolor: '#05080d', border: 0, borderRight: '1px solid rgba(65,147,192,.22)' } }}>{drawer}</Drawer>
       <Box sx={{ minWidth: 0, flex: 1 }}>
-        <AppBar position="sticky" elevation={0} sx={{ bgcolor: 'rgba(8,13,20,.86)', backdropFilter: 'blur(18px)', borderBottom: '1px solid rgba(154,175,193,.1)' }}>
+        <AppBar position="sticky" elevation={0} sx={{ bgcolor: 'rgba(5,8,13,.96)', backdropFilter: 'blur(18px)', borderBottom: '1px solid rgba(65,147,192,.22)' }}>
           <Toolbar sx={{ minHeight: '72px !important', px: { xs: 2, md: 4 } }}>
             {!desktop && <IconButton onClick={() => setMobileOpen(true)} sx={{ mr: 1.5, color: 'text.primary' }} aria-label="Open navigation"><MenuIcon /></IconButton>}
-            <Box><Typography sx={{ color: '#708393', fontSize: 10, letterSpacing: 1.7, fontWeight: 800 }}>SECURITY OPERATIONS / {pageTitle.toUpperCase()}</Typography><Typography sx={{ fontSize: 15, fontWeight: 750, mt: .3 }}>{pageTitle}</Typography></Box>
+            <Box><Typography sx={{ color: '#8196A8', fontSize: 10, letterSpacing: 1.7, fontWeight: 800 }}>SECURITY OPERATIONS / {pageTitle.toUpperCase()}</Typography><Typography sx={{ fontSize: 15, fontWeight: 750, mt: .3 }}>{pageTitle}</Typography></Box>
             <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 } }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: .9, px: 1.4, py: .8, bgcolor: statusConfig.bg, border: `1px solid ${statusConfig.border}`, borderRadius: 20 }}><Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: statusConfig.color, boxShadow: `0 0 9px ${statusConfig.color}` }} /><Typography sx={{ fontSize: 10, fontWeight: 850, letterSpacing: .8, color: statusConfig.color, display: { xs: 'none', sm: 'block' } }}>{statusConfig.label}</Typography></Box>
-              <Button variant="outlined" size="small" startIcon={<LogoutIcon />} onClick={handleLogout} sx={{ color: '#AAB8C2', borderColor: 'rgba(154,175,193,.18)', '&:hover': { borderColor: 'primary.main', color: 'primary.light' } }}>Sign out</Button>
+              <Button variant="outlined" size="small" startIcon={<LogoutIcon />} onClick={handleLogout} sx={{ color: '#AAB8C2', borderColor: 'rgba(65,147,192,.3)', '&:hover': { borderColor: 'primary.main', color: 'primary.light' } }}>Sign out</Button>
             </Box>
           </Toolbar>
         </AppBar>
@@ -434,3 +436,9 @@ function App() {
 }
 
 export default App;
+
+
+
+
+
+
