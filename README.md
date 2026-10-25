@@ -742,3 +742,4 @@ bounded by depth, file count, and bytes. Symbolic links and credential/repositor
 metadata paths are rejected or omitted. Platform filesystem semantics still
 matter: keep the workspace owned by a dedicated service account and prevent
 other local users from changing its directory tree while the service runs.
+

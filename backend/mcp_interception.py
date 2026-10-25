@@ -1630,3 +1630,4 @@ async def intercept_request(
         request, messages, allowed, blocked, agent, session_id, emit_event,
         is_batch=isinstance(payload, list),
     )
+
