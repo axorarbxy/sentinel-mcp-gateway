@@ -99,3 +99,18 @@ code, pre, .mono { font-family: 'DM Mono', 'SFMono-Regular', Consolas, monospace
 /* Keep keyboard navigation visible against the dark UI. */
 :focus-visible { outline: 2px solid #28a9e0; outline-offset: 3px; }
 .MuiButton-root:focus-visible, .MuiIconButton-root:focus-visible, .MuiListItemButton-root:focus-visible, .MuiTab-root:focus-visible { outline: 2px solid #ff3b78; outline-offset: 2px; z-index: 1; }
+
+/* Strengthen surface and text contrast when the operating system requests it. */
+@media (prefers-contrast: more) {
+  body { color: #ffffff; }
+  .MuiPaper-root, .MuiCard-root {
+    border-color: rgba(116, 205, 245, .72) !important;
+    border-top-color: #9fe2ff !important;
+  }
+  .MuiTypography-root.MuiTypography-body2,
+  .MuiTypography-root.MuiTypography-caption,
+  .MuiTypography-root.MuiTypography-overline {
+    color: #d9e9f5;
+  }
+  .MuiOutlinedInput-notchedOutline { border-color: rgba(116, 205, 245, .78) !important; }
+}
