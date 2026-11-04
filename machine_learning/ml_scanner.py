@@ -142,7 +142,7 @@ KNOWN_BENIGN_DOMAINS = [
     'hackthebox.com', 'cybrary.it', 'udemy.com', 'coursera.org',
     'edx.org', 'khanacademy.org', 'w3schools.com', 'mdn.mozilla.org',
     'digitalocean.com', 'aws.amazon.com', 'azure.microsoft.com',
-    'cloud.google.com', 'heroku.com', 'vercel.com', 'netlify.com',
+    'cloud.google.com', 'heroku.com', 'netlify.com',
     'npmjs.com', 'pypi.org', 'docker.com', 'kubernetes.io',
     'redhat.com', 'ubuntu.com', 'debian.org', 'mozilla.org',
     'cloudflare.com', 'akamai.com', 'fastly.com',

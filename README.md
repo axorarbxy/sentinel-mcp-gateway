@@ -134,7 +134,7 @@ The dashboard provides a command center, threat alerts, agent and MCP gateway vi
 | JSON-RPC 2.0 validation, size/depth limits, duplicate-key checks, and tool policy. | Invalid messages are rejected before forwarding; blocked tools return a JSON-RPC error. |
 | Redacted audit event persisted with the decision; event publication handled asynchronously. | Missing upstream: `503`; unavailable or invalid upstream response: `502`. |
 
-Use HTTPS outside local development, keep secrets in the deployment environment, and never place an agent key in a URL. See [Agent API key authentication](#agent-api-key-authentication) and [upstream configuration](#configure-an-upstream) for the full behavior and setup.
+For remote use, protect traffic with HTTPS, keep secrets in the service environment, and never place an agent key in a URL. See [Agent API key authentication](#agent-api-key-authentication) and [upstream configuration](#configure-an-upstream) for the full behavior and setup.
 
 ## 🧩 Event lifecycle
 
@@ -213,7 +213,7 @@ npm start
 
 The API listens at `http://localhost:8001`; the frontend starts separately. The application reads configuration from the process environment; copying `.env.example` to `.env` does not load it automatically. To enable Redis-backed delivery, install `requirements-redis.txt` and set `SENTINEL_REDIS_URL` before starting the backend.
 
-For the browser extension, build a fresh archive from the current extension source with `python security/package_extension.py`. Load the `security/extension` directory as an unpacked extension in Chrome/Chromium developer mode, or use the generated `frontend/public/sentinel-extension.zip` download. Review extension permissions and configure any required backend connection for your deployment before enabling it.
+For the browser extension, build a fresh archive from the current extension source with `python security/package_extension.py`. Load the `security/extension` directory as an unpacked extension in Chrome/Chromium developer mode, or use the generated `frontend/public/sentinel-extension.zip` download. Review extension permissions and configure any required backend connection for your setup before enabling it.
 
 ### Create a local operator account
 
@@ -285,13 +285,13 @@ Failed attempts and lockouts are audited with the source IP and lookup prefix,
 never the presented secret. Authentication failures are limited per source IP
 and key prefix; successful traffic is limited per agent. These limits and the
 audit/rate-limit state are process-local, so multi-worker or multi-host
-deployments should place the service behind a shared rate-limit/audit store.
+setups should place the service behind a shared rate-limit/audit store.
 
-Use HTTPS for every non-local deployment. Terminate TLS at a trusted ingress or
+Use HTTPS whenever the service is reached over a network. Terminate TLS at a trusted proxy or
 enable `SENTINEL_FORCE_HTTPS=true` when HTTPS reaches the application directly.
 Do not expose the development HTTP listener to an untrusted network. Configure
 `SECRET_KEY`, `SENTINEL_ALLOWED_HOSTS`, and `SENTINEL_CORS_ORIGINS` from the
-deployment environment; do not use the example secret in production.
+service environment; do not use the example secret in production.
 
 Rejected-call example:
 

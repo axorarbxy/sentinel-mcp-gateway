@@ -223,8 +223,8 @@ signals are reported as security detections.
     contact={"name": "Sentinel-MCP"},
 )
 
-# Deployment controls are opt-in locally and enforced by environment in a
-# reverse-proxy or production deployment. Never hard-code certificates/keys.
+# HTTPS and host controls are opt-in locally and can be enforced by the
+# service environment or a trusted reverse proxy. Never hard-code secrets.
 if os.getenv("SENTINEL_FORCE_HTTPS", "false").lower() == "true":
     app.add_middleware(HTTPSRedirectMiddleware)
 

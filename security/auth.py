@@ -19,7 +19,7 @@ AGENT_KEY_PATTERN = re.compile(
 
 
 def is_demo_environment() -> bool:
-    """Enable demo-only operator privileges outside production deployments."""
+    """Enable demo-only operator privileges outside production mode."""
     environment = os.getenv("SENTINEL_ENVIRONMENT", "dev").strip().lower()
     return environment in {"dev", "development", "local"}
 
