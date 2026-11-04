@@ -1,8 +1,8 @@
 <div align="center">
 
-# 🛡️ Sentinel MCP Gateway
+# 🛡️ CyberEye Security Platform · Sentinel MCP Gateway
 
-### A security checkpoint for AI agents and MCP tools
+### Security operations, threat analysis, and policy enforcement for AI agents and MCP tools
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -11,21 +11,21 @@
 [![Research](https://img.shields.io/badge/Research-SECUREVENT%202026-F59E0B)](https://arxiv.org/abs/2606.01741)
 [![License](https://img.shields.io/badge/License-MIT-2563EB)](LICENSE)
 
-**Inspect, enforce, and audit MCP traffic between agents and their tools.**
+**CyberEye brings security monitoring and analysis together with Sentinel, a policy gateway for MCP traffic between AI agents and their tools.**
 
-[Quick start](#-quick-start) · [Architecture](#-how-it-fits-together) · [Security](#-security-at-a-glance) · [Operations](#-mcp-request-interception)
+[Quick start](#-quick-start) · [Platform features](#-platform-features) · [Security](#-security-at-a-glance) · [MCP gateway](#mcp-request-interception)
 
 </div>
 
 ---
 
-## 🌈 What Sentinel does
+## 🌈 What the platform does
 
-Sentinel sits between an AI agent and an MCP server. It authenticates each agent, checks each request against policy, forwards permitted traffic to a configured upstream, and records a redacted event for operators.
+CyberEye is the security workspace and operator dashboard. Its analysis modules inspect security signals, while Sentinel sits between an AI agent and an MCP server: it authenticates each agent, checks requests against policy, forwards permitted traffic to a configured upstream, and records redacted events for operators.
 
 | 🔐 **Control** | 🧠 **Understand** | 📡 **Operate** |
 |:--|:--|:--|
-| Per-agent credentials, tool allowlists, input validation, and fail-closed decision hooks. | Behavioral baselines and anomaly signals complement deterministic policy decisions. | Auditable request history, live dashboard events, and optional Redis, MQTT, or Kafka delivery. |
+| Per-agent credentials, tool allowlists, input validation, taint-aware sensitive-tool checks, and fail-closed decision hooks. | Security analysis modules, behavioral baselines, and anomaly signals complement deterministic policy decisions. | Operator dashboards, auditable history, a browser extension, and optional Redis, MQTT, or Kafka event delivery. |
 
 > **Design principle:** policy makes the synchronous allow/block decision. Behavioral and correlation detections add investigation signals and do not silently turn into an enforcement verdict.
 
@@ -93,11 +93,38 @@ flowchart LR
 ## ✨ Capabilities
 
 - **🧱 Policy enforcement:** per-agent allowed tools, strict handling of unknown methods, and an asynchronous decision hook that fails closed on error or timeout.
+- **🧷 Sensitive-action safeguards:** optional per-session untrusted-data taint tracking for configured sensitive tools; policy matches exact upstream tool names.
 - **🔑 Credential lifecycle:** one-time agent keys, rotation and revocation, suspension, and distinct operator authentication.
 - **🧠 Behavioral monitoring:** per-agent Isolation Forest baselines, bounded argument-shape signals, and anomaly alerts.
 - **🧾 Safer telemetry:** versioned events with sensitive values redacted before persistence or broadcast.
 - **⚡ Durable delivery:** transactional outbox, retry and dead-letter handling, Redis Streams, and optional MQTT/Kafka fan-out.
-- **📈 Operator dashboard:** inspect agents, policies, alerts, events, and live traffic from the frontend.
+- **📈 Security workspace:** inspect agents, policies, alerts, events, live traffic, and module analysis from the React dashboard.
+- **🧪 Analysis modules:** phishing, malware, network intrusion, insider threat, Android permissions, password strength, QR safety, and payload scoring.
+- **🌐 Browser protection:** a Manifest V3 extension with URL blocking rules and a block page, packaged for download from the frontend.
+- **🧰 Workspace MCP service:** an independently authenticated service for scoped workspace reads and writes with a separate approval flow.
+
+## 🧭 Platform features
+
+The dashboard provides a command center, threat alerts, agent and MCP gateway views, policy management, and individual analysis screens. The backend also exposes health, event, alert, model-information, and scoring APIs. The optional standalone CyberEye workspace MCP service runs separately from the gateway and has its own JWT configuration and approval database.
+
+| Area | What it provides |
+|:--|:--|
+| Sentinel MCP gateway | Agent authentication, upstream proxying, runtime policy checks, session boundaries, and audit events |
+| CyberEye modules | URL/file/network/user/Android/password/QR analysis, plus payload and network-flow scoring |
+| Event operations | SQLite-backed history and outbox; optional Redis Streams, MQTT, and Kafka transports |
+| Browser extension | Chrome/Chromium Manifest V3 protection, source in `security/extension/` |
+| Workspace MCP service | Separate scoped file tools with expiring, single-use approval records |
+
+## 🗂️ Repository layout
+
+| Path | Purpose |
+|:--|:--|
+| `backend/` | FastAPI gateway, MCP proxy, event pipeline, analysis APIs, and standalone workspace MCP service |
+| `frontend/` | React operator dashboard and downloadable extension archive |
+| `security/` | Runtime policies, SQLi controls, shell analysis, and browser extension source |
+| `machine_learning/` | Model inference, training utilities, datasets, and model artifacts |
+| `database/` | SQLAlchemy database setup and local SQLite data |
+| `monitoring/` | Monitoring utilities and operations notes |
 
 ## 🛡️ Security at a glance
 
@@ -155,6 +182,7 @@ sequenceDiagram
 
 - Python 3.11 or newer
 - Node.js and npm for the dashboard
+- Git (for cloning the repository)
 - Redis 6.2 or newer for durable shared streams and multi-worker coordination (optional for local single-process development)
 
 ### Install and run
@@ -184,6 +212,8 @@ npm start
 ```
 
 The API listens at `http://localhost:8001`; the frontend starts separately. The application reads configuration from the process environment; copying `.env.example` to `.env` does not load it automatically. To enable Redis-backed delivery, install `requirements-redis.txt` and set `SENTINEL_REDIS_URL` before starting the backend.
+
+For the browser extension, build a fresh archive from the current extension source with `python security/package_extension.py`. Load the `security/extension` directory as an unpacked extension in Chrome/Chromium developer mode, or use the generated `frontend/public/sentinel-extension.zip` download. Review extension permissions and configure any required backend connection for your deployment before enabling it.
 
 ### Create a local operator account
 
