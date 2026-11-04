@@ -30,5 +30,5 @@ combined with this benchmark. Do not map packet labels directly onto broker
 authorization or downstream-effect labels without evidence.
 
 The generated data is for prototyping only. Its attack patterns and class
-balance are authored, not measured from a production deployment. The trained
+balance are authored, not measured from real-world operations. The trained
 artifact is an offline benchmark and is not loaded by the live gateway.

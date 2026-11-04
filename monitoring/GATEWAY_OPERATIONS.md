@@ -1,13 +1,13 @@
-# Gateway operations and deployment
+# Gateway operations
 
 Sentinel-MCP is an application gateway. It validates MCP traffic and exposes
 management/telemetry APIs; it does not expose database tables as public APIs.
 
-## Production security
+## Network security
 
 Terminate TLS at an ingress or reverse proxy and forward requests to the
-gateway only over a private network. Set these environment variables in that
-deployment:
+gateway only over a private network. Set these environment variables in the
+service environment when it is accessed over a network:
 
 ```text
 SENTINEL_FORCE_HTTPS=true
@@ -39,14 +39,4 @@ For auditable extensions such as custom logging or authentication integration,
 set `SENTINEL_GATEWAY_PLUGINS` to comma-separated `module:callable` targets.
 Hooks receive `(event, data)` for `mcp.request_received` and `mcp.decision`.
 Plugin exceptions are isolated and logged, so an optional extension cannot
-bring down traffic enforcement. Review and version plugin source in Git before
-deployment.
-
-## Source control and CI/CD
-
-Keep gateway configuration in reviewed environment templates or infrastructure
-code, not in the database or source. Protect the main branch, require review,
-run Python compilation/import tests and the frontend TypeScript check on every
-pull request, and promote the same immutable build through environments.
-Record policy changes through the management API/audit log and export them to
-version-controlled policy definitions before production rollout.
+bring down traffic enforcement. Review plugin source before enabling it.

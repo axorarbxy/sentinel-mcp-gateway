@@ -1,7 +1,7 @@
 """Generate reproducible, labeled synthetic multi-tenant event-security traces.
 
 The generated data is a research/demo benchmark, not telemetry from real users
-and not a substitute for validation on a target broker deployment.
+and does not replace validation against a live broker environment.
 """
 
 from __future__ import annotations

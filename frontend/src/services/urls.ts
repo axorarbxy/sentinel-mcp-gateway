@@ -1,4 +1,4 @@
-/** Shared base URLs for local development and production deployments. */
+/** Shared API base URLs for local development and configured services. */
 const isLocalDevelopment =
   typeof window !== 'undefined' &&
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');

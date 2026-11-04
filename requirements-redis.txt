@@ -1,2 +1,2 @@
-# Optional shared coordination backend for multi-worker production deployments.
+# Optional shared coordination backend for multi-worker setups.
 redis==6.4.0
