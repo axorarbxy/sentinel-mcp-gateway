@@ -14,10 +14,33 @@ Install by importing this module and calling ``install()``, which replaces
 from __future__ import annotations
 
 import logging
+import sys
+from importlib import import_module
 from typing import Any
 
-from mcp_interception import Decision, InterceptionEvent, default_decision_hook
-from shell_analysis import ShellAction, analyse_tool_call
+if __package__:
+    _mcp_interception = sys.modules.get("mcp_interception")
+    if _mcp_interception is None:
+        from backend import mcp_interception as _mcp_interception
+        from backend import shared_state as _shared_state
+
+        # Keep package-style imports and the gateway's historical top-level imports
+        # bound to the same interception and shared-state modules.
+        sys.modules.setdefault("mcp_interception", _mcp_interception)
+        sys.modules.setdefault("shared_state", _shared_state)
+else:
+    _mcp_interception = sys.modules.get("mcp_interception")
+    if _mcp_interception is None:
+        _mcp_interception = import_module("mcp_interception")
+
+if __package__:
+    from .shell_analysis import ShellAction, analyse_tool_call
+else:
+    from shell_analysis import ShellAction, analyse_tool_call
+
+Decision = _mcp_interception.Decision
+InterceptionEvent = _mcp_interception.InterceptionEvent
+default_decision_hook = _mcp_interception.default_decision_hook
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +166,5 @@ def _parse_workspace_roots(raw: Any) -> list[str]:
 
 def install() -> None:
     """Replace the default decision hook with the shell-policy-aware one."""
-    import mcp_interception
-
-    mcp_interception.decision_hook = shell_policy_decision_hook
+    _mcp_interception.decision_hook = shell_policy_decision_hook
     logger.info("Shell policy decision hook installed")

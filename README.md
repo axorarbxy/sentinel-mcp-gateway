@@ -126,6 +126,60 @@ The dashboard provides a command center, threat alerts, agent and MCP gateway vi
 | `database/` | SQLAlchemy database setup and local SQLite data |
 | `monitoring/` | Monitoring utilities and operations notes |
 
+## 🧰 Security Python package API
+
+The `security` package initializer provides a lazy public interface to the
+existing authentication, authorization, policy, shell-analysis, and SQL
+security modules. Implementations remain in their focused modules; importing
+`security` alone does not load route handlers, authentication providers, or the
+shell-analysis engine.
+
+```python
+import security
+
+print(security.__version__)
+print(security.CAPABILITIES["policy"])
+
+policy = security.load_subsystem("policy")
+decision = security.PolicyEngine().evaluate(
+    "tools/call",
+    {"name": "read_file", "arguments": {"path": "notes.txt"}},
+)
+
+shell = security.load_subsystem("shell")
+shell["install_shell_policy"]()
+```
+
+`security.__all__` lists the package-level exports. Accessing a symbol such as
+`security.analyze_sql_injection` loads only the module that defines it.
+`security.discover_modules()` reports Python modules present in the package,
+and `security.load_subsystem(name)` loads one of `authentication`,
+`authorization`, `policy`, `shell`, or `sql`, returning a read-only mapping of
+that subsystem's documented exports. An unknown subsystem raises `ValueError`;
+dependency or import errors are propagated rather than hidden.
+
+The public API groups include:
+
+- **Authentication:** password hashing and verification, access/refresh JWT
+  helpers, agent API-key generation/parsing/verification, and OAuth scope
+  helpers and route models.
+- **Authorization and policy:** `DEFAULT_ACL`, OAuth scopes, policy result and
+  decision types, `PolicyEngine`, and MCP ACL, path, shell-command, SQL, and
+  composite checks.
+- **Shell:** analysis result/finding types, risk and action enums, command
+  analysis helpers, and the MCP shell-policy decision hook. The hook is
+  installed only when `install_shell_policy()` is explicitly called.
+- **SQL:** SQL-injection analysis, SQL text normalization, SQL-mode resolution,
+  indicator listing, runtime configuration, and policy route models.
+
+For production configuration checks, call
+`security.validate_security_configuration()` before startup. It returns a
+tuple of actionable errors and requires `SECRET_KEY` to contain at least 32
+UTF-8 bytes when `SENTINEL_ENVIRONMENT` is `prod` or `production`. This helper
+does not configure the application or replace deployment-time secret
+management. The JWT signing key itself is intentionally not exposed through
+the package API.
+
 ## 🛡️ Security at a glance
 
 | 🟢 Request path | 🔴 Failure behavior |
@@ -165,6 +219,7 @@ sequenceDiagram
 ## 📚 Contents
 
 - [Quick start](#-quick-start)
+- [Security Python package API](#-security-python-package-api)
 - [Agent API key authentication](#agent-api-key-authentication)
 - [MCP request interception](#mcp-request-interception)
   - [Supported transport](#supported-transport)
