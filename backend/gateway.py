@@ -61,6 +61,8 @@ from event_pipeline import (
     validate_event_security_configuration,
 )
 from event_transports import close_event_transports, validate_transport_configuration
+from network_firewall_routes import router as network_firewall_router
+from network_firewall.service import validate_firewall_configuration
 
 # Import auth routes
 from auth_routes import router as auth_router
@@ -147,12 +149,15 @@ async def _deliver_mcp_stream_event(message: dict) -> None:
         await traffic_broadcaster.broadcast(message)
     elif message.get("type") == "mcp_event" and isinstance(message.get("data"), dict):
         await traffic_broadcaster.broadcast(message)
+    elif message.get("type") == "network_firewall_event" and isinstance(message.get("data"), dict):
+        await traffic_broadcaster.broadcast(message)
 
 
 @asynccontextmanager
 async def gateway_lifespan(_app):
     validate_event_security_configuration()
     validate_transport_configuration()
+    validate_firewall_configuration()
     state = await configure_shared_state()
     await state.ensure_event_consumer_group(EVENT_CONSUMER_GROUP)
     restore_behavioral_models()
@@ -186,6 +191,7 @@ API_TAGS = [
     {"name": "authentication", "description": "User registration, login, and token lifecycle."},
     {"name": "mcp-management", "description": "Manage MCP agents, servers, and security policies."},
     {"name": "MCP Proxy", "description": "Authenticated MCP JSON-RPC traffic enforcement."},
+    {"name": "Network firewall", "description": "Operator-managed outbound destination policy and network decision telemetry."},
     {"name": "Monitoring", "description": "Gateway health, request activity, and detection telemetry."},
     {"name": "Real-time", "description": "WebSocket traffic stream for live dashboard updates."},
     {"name": "CyberEye", "description": "CyberEye module analysis, alerts, and risk data."},
@@ -377,6 +383,7 @@ app.include_router(sqli_router)
 
 # ============ INCLUDE MCP MANAGEMENT ROUTES ============
 app.include_router(mcp_router)
+app.include_router(network_firewall_router)
 
 # ============ SETUP ML ROUTES ============
 setup_ml_routes(app)
@@ -654,7 +661,9 @@ class TrafficBroadcaster:
                 return False
             await websocket.accept(subprotocol="cybereye.v1")
             self.active_connections.add(websocket)
-            self.subscriptions[websocket] = {"event_types": {"mcp_event", "security_correlation"}}
+            self.subscriptions[websocket] = {
+                "event_types": {"mcp_event", "security_correlation", "network_firewall_event"}
+            }
         logger.info("WebSocket connected (worker-local total: %s)", len(self.active_connections))
         return True
 
@@ -676,8 +685,8 @@ class TrafficBroadcaster:
             else:
                 if any(not isinstance(value, str) or not value or len(value) > 80 for value in values):
                     raise ValueError(f"{key} must contain non-empty strings of at most 80 characters")
-                if key == "decisions" and any(value not in {"allow", "block", "flag"} for value in values):
-                    raise ValueError("decisions may contain only allow, block, and flag")
+                if key == "decisions" and any(value not in {"allow", "block", "flag", "review"} for value in values):
+                    raise ValueError("decisions may contain only allow, block, flag, and review")
                 normalized[key] = set(values)
         return normalized
 

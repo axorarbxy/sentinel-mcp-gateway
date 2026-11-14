@@ -37,7 +37,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 logger = logging.getLogger(__name__)
 
 MAX_REQUEST_BYTES = 1_048_576
-MAX_RESPONSE_BYTES = 10_485_760
+MAX_RESPONSE_BYTES = int(os.getenv("SENTINEL_NETWORK_MAX_RESPONSE_BYTES", "10485760"))
 MAX_BATCH_SIZE = 20
 MAX_NESTING_DEPTH = 32
 MAX_EVENT_PAYLOAD_BYTES = 16_384
@@ -1155,6 +1155,7 @@ async def _forward(
     session_id: str | None,
     emit_event: Callable[[dict[str, Any]], Awaitable[None]] | None,
     is_batch: bool,
+    firewall_transport: httpx.AsyncBaseTransport | None = None,
 ) -> Response:
     sent_messages = [message for message, _ in allowed]
     sent_payload: Any = sent_messages[0] if len(sent_messages) == 1 else sent_messages
@@ -1205,7 +1206,10 @@ async def _forward(
             if len(sent_messages) == 1 and not is_batch:
                 message, event = allowed[0]
                 keep_pending = False
-                client = httpx.AsyncClient(timeout=httpx.Timeout(UPSTREAM_TIMEOUT_SECONDS, read=None))
+                client = httpx.AsyncClient(
+                    timeout=httpx.Timeout(UPSTREAM_TIMEOUT_SECONDS, read=None),
+                    transport=firewall_transport,
+                )
                 await _global_upstream_slots.acquire()
                 try:
                     upstream_request = client.build_request(
@@ -1324,7 +1328,10 @@ async def _forward(
                 if batch_task is not None and claimed_keys:
                     _transfer_local_request_owner(claimed_keys, batch_task)
                 try:
-                    async with httpx.AsyncClient(timeout=UPSTREAM_TIMEOUT_SECONDS) as client:
+                    async with httpx.AsyncClient(
+                        timeout=UPSTREAM_TIMEOUT_SECONDS,
+                        transport=firewall_transport,
+                    ) as client:
                         batch_slots = asyncio.Semaphore(MAX_CONCURRENT_PER_SESSION)
 
                         async def send_one(message: dict[str, Any]) -> Any:
@@ -1621,9 +1628,12 @@ async def intercept_request(
             # Client-provided identity claims are never forwarded upstream.
             allowed.append((forwarded, event))
 
+    firewall_transport: httpx.AsyncBaseTransport | None = None
+    firewall = None
+    network_decision = None
     try:
         if allowed:
-            _validate_upstream(agent)
+            upstream_url, _ = _validate_upstream(agent)
     except ValueError:
         for _, event in allowed:
             event.response_status = "error"
@@ -1633,8 +1643,72 @@ async def intercept_request(
             event.response_status = "error"
             await _persist_and_emit(event, emit_event)
         return _error_http(503, "MCP upstream is not configured")
+    if allowed:
+        try:
+            from network_firewall.service import get_network_firewall
 
-    return await _forward(
+            firewall = get_network_firewall()
+            network_decision = await firewall.evaluate_request(
+                agent_id=agent_id,
+                destination=upstream_url,
+                metadata={"request_id": request.headers.get("x-request-id")},
+            )
+            if network_decision.decision != "ALLOW":
+                reason = "MCP upstream blocked by network firewall"
+                for _, event in allowed:
+                    event.decision = "block"
+                    event.decision_reason = reason
+                    event.matched_rule_ids = list(dict.fromkeys(
+                        [*event.matched_rule_ids, network_decision.rule_id or "NET-DEFAULT-DENY"]
+                    ))
+                    event.decision_source = "network-firewall"
+                    event.response_status = "error"
+                    await _persist_and_emit(event, emit_event)
+                for _, event in blocked:
+                    event.response_status = "error"
+                    await _persist_and_emit(event, emit_event)
+                return _error_http(403, reason)
+            if firewall.config.enabled:
+                parsed_upstream = urlsplit(upstream_url)
+                firewall_transport = firewall.create_pinned_transport(
+                    parsed_upstream.hostname or "",
+                    network_decision.resolved_addresses,
+                )
+        except Exception:
+            logger.exception("Network firewall failed before outbound MCP connection")
+            for _, event in allowed:
+                event.decision = "block"
+                event.decision_reason = "Network firewall unavailable; failing closed"
+                event.matched_rule_ids = list(dict.fromkeys(
+                    [*event.matched_rule_ids, "NET-ENGINE-ERROR"]
+                ))
+                event.decision_source = "network-firewall"
+                event.response_status = "error"
+                await _persist_and_emit(event, emit_event)
+            for _, event in blocked:
+                event.response_status = "error"
+                await _persist_and_emit(event, emit_event)
+            return _error_http(503, "Network firewall unavailable")
+
+    connection_started = time.perf_counter()
+    response = await _forward(
         request, messages, allowed, blocked, agent, session_id, emit_event,
         is_batch=isinstance(payload, list),
+        firewall_transport=firewall_transport,
     )
+    if firewall and firewall.config.enabled and network_decision:
+        await firewall.record_connection({
+            "event_id": network_decision.event_id,
+            "agent_id": agent_id,
+            "destination": network_decision.destination,
+            "destination_ip": network_decision.resolved_addresses[0] if network_decision.resolved_addresses else None,
+            "port": urlsplit(upstream_url).port or (443 if urlsplit(upstream_url).scheme == "https" else 80),
+            "protocol": urlsplit(upstream_url).scheme,
+            "decision": network_decision.decision,
+            "rule_id": network_decision.rule_id,
+            "reason": network_decision.reason,
+            "outcome": "success" if response.status_code < 400 else "failure",
+            "duration_ms": round((time.perf_counter() - connection_started) * 1000, 3),
+            "request_id": request.headers.get("x-request-id"),
+        })
+    return response

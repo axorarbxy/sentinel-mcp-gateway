@@ -22,8 +22,27 @@ SECRET_KEY=<stable-secret-from-your-secret-manager>
 `SENTINEL_FORCE_HTTPS` must not be enabled for a plain HTTP local development
 server. Never place TLS keys, JWT secrets, or API keys in the repository.
 
+## Outbound network policy
+
+The application firewall is an additional MCP-upstream policy layer, not a
+replacement for host packet filtering, cloud security groups, network policies,
+restricted DNS, or a controlled egress proxy. It is disabled by default for
+development. Production startup fails unless
+`SENTINEL_NETWORK_FIREWALL_ENABLED=true` and the default action is `BLOCK`.
+
+Configure approved destinations explicitly with `SENTINEL_NETWORK_ALLOWED_DOMAINS`
+or the admin-only `/network-firewall/rules` API. The default allowed protocol
+and port are HTTPS and 443; private, loopback, and link-local destinations are
+blocked. If an internal upstream is required, explicitly set
+`SENTINEL_NETWORK_BLOCK_PRIVATE=false` and add a narrowly scoped destination
+rule; default-deny remains in effect. The proxy resolves and validates all destination addresses and pins
+each outbound connection to a validated result. DNS failures and policy service
+errors fail closed. Use `POST /network-firewall/test` to simulate a rule without
+DNS lookups or outbound requests.
+
 Management endpoints under `/mcp/*` require a JWT with the `gateway:admin`
 OAuth scope. MCP traffic at `/mcp/proxy` uses a separate agent API key.
+Network firewall administration endpoints require `gateway:admin`.
 
 ## Monitoring and failure behavior
 

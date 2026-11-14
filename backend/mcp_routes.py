@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
+import logging
 import json
 import os
 import re
@@ -20,6 +21,7 @@ from database import get_db, MCPAgent, MCPServer, MCPPolicy, AuditLog
 from auth import create_agent_api_key, hash_api_key, decode_token
 from auth_routes import require_scopes
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/mcp",
@@ -691,15 +693,67 @@ async def check_server_health(server_id: int, db: Session = Depends(get_db)):
         db.commit()
         raise HTTPException(status_code=503, detail="Upstream health checks are temporarily paused after repeated failures")
     import httpx
+    network_decision = None
+    firewall = None
+    connection_started = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        from network_firewall.destination_validator import parse_destination
+        from network_firewall.service import get_network_firewall
+
+        firewall = get_network_firewall()
+        network_decision = await firewall.evaluate_request(
+            agent_id=f"server:{server.id}",
+            destination=server.url,
+            metadata={"operation": "server_health_check"},
+        )
+        if network_decision.decision != "ALLOW":
+            server.health_status = "blocked_by_firewall"
+            server.last_health_check = utcnow()
+            server_circuit_breaker.record_failure(server.id)
+            db.commit()
+            raise HTTPException(status_code=403, detail="Network firewall blocked this server health check")
+        transport = None
+        if firewall.config.enabled:
+            parsed = parse_destination(server.url)
+            transport = firewall.create_pinned_transport(
+                parsed.hostname, network_decision.resolved_addresses,
+            )
+        async with httpx.AsyncClient(timeout=5.0, transport=transport) as client:
             response = await client.get(f"{server.url}/health")
             server.health_status = "online" if response.status_code == 200 else "offline"
             if response.status_code == 200:
                 server_circuit_breaker.record_success(server.id)
             else:
                 server_circuit_breaker.record_failure(server.id)
-    except Exception:
+        if firewall.config.enabled:
+            await firewall.record_connection({
+                "event_id": network_decision.event_id,
+                "agent_id": f"server:{server.id}",
+                "destination": network_decision.destination,
+                "destination_ip": network_decision.resolved_addresses[0] if network_decision.resolved_addresses else None,
+                "port": parse_destination(server.url).port,
+                "protocol": parse_destination(server.url).protocol,
+                "decision": network_decision.decision,
+                "rule_id": network_decision.rule_id,
+                "reason": network_decision.reason,
+                "outcome": "success" if response.status_code == 200 else "failure",
+                "duration_ms": round((time.perf_counter() - connection_started) * 1000, 3),
+            })
+    except HTTPException:
+        raise
+    except (httpx.HTTPError, ValueError):
+        logger.exception("MCP server health check failed server_id=%s", server.id)
+        if firewall and firewall.config.enabled and network_decision:
+            await firewall.record_connection({
+                "event_id": network_decision.event_id,
+                "agent_id": f"server:{server.id}",
+                "destination": network_decision.destination,
+                "decision": network_decision.decision,
+                "rule_id": network_decision.rule_id,
+                "reason": network_decision.reason,
+                "outcome": "failure",
+                "duration_ms": round((time.perf_counter() - connection_started) * 1000, 3),
+            })
         server.health_status = "offline"
         server_circuit_breaker.record_failure(server.id)
 

@@ -8,6 +8,7 @@ export interface TrafficEvent {
   agent_id: number | string;
   agent_name: string;
   method: string;
+  event_type?: string;
   tool_name: string | null;
   environment: string | null;
   latency_ms: number | null;
@@ -31,6 +32,11 @@ export interface TrafficEvent {
   total_blocked?: number;
   total_anomalies?: number;
   severity?: string;
+  network_destination?: string;
+  destination_ip?: string;
+  destination_port?: number;
+  network_protocol?: string;
+  network_outcome?: string;
   correlation_window_seconds?: number;
   trigger_event_id?: string;
   observable_features?: ObservableFeatureFamilies;
@@ -45,13 +51,20 @@ export interface ObservableFeatureFamilies {
   broker_state?: Record<string, string | number | boolean | null>;
 }
 
-const normalizeTrafficEvent = (value: unknown): TrafficEvent | null => {
+const normalizeTrafficEvent = (value: unknown, eventType?: string): TrafficEvent | null => {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
-  if (typeof raw.timestamp !== 'string' || typeof raw.method !== 'string') return null;
+  const isNetworkEvent = eventType === 'network_firewall_event' || typeof raw.destination === 'string';
+  const method = typeof raw.method === 'string' ? raw.method : isNetworkEvent ? 'network/firewall' : null;
+  if (typeof raw.timestamp !== 'string' || !method) return null;
 
-  const decision = typeof raw.decision === 'string'
-    ? raw.decision
+  const rawDecision = typeof raw.decision === 'string' ? raw.decision.toLowerCase() : null;
+  const decision = rawDecision === 'review'
+    ? 'flag'
+    : rawDecision === 'allow' || rawDecision === 'block' || rawDecision === 'flag'
+      ? rawDecision
+    : isNetworkEvent
+      ? 'block'
     : raw.allowed === false || raw.policy_allowed === false
       ? 'block'
       : 'allow';
@@ -70,18 +83,23 @@ const normalizeTrafficEvent = (value: unknown): TrafficEvent | null => {
     : {};
 
   return {
-    event_id: typeof raw.event_id === 'string' ? raw.event_id : `${raw.timestamp}:${agentId}:${raw.method}`,
+    event_id: typeof raw.event_id === 'string' ? raw.event_id : `${raw.timestamp}:${agentId}:${method}`,
     timestamp: raw.timestamp,
     agent_id: agentId,
     agent_name: typeof raw.agent_name === 'string'
       ? raw.agent_name
-      : typeof raw.agent_id === 'string'
+      : isNetworkEvent
+        ? `Agent ${agentId}`
+        : typeof raw.agent_id === 'string'
         ? raw.agent_id
         : `Agent ${agentId}`,
-    method: raw.method,
+    method,
+    event_type: isNetworkEvent ? 'network_firewall_event' : eventType,
     tool_name: typeof raw.tool_name === 'string' ? raw.tool_name : null,
     environment: typeof raw.environment === 'string' ? raw.environment : null,
-    latency_ms: typeof raw.latency_ms === 'number' ? raw.latency_ms : null,
+    latency_ms: typeof raw.latency_ms === 'number'
+      ? raw.latency_ms
+      : typeof raw.duration_ms === 'number' ? raw.duration_ms : null,
     decision,
     decision_reason: reason,
     rule_risk_score: typeof raw.rule_risk_score === 'number' ? raw.rule_risk_score : null,
@@ -90,10 +108,15 @@ const normalizeTrafficEvent = (value: unknown): TrafficEvent | null => {
       : typeof eventPayload.ml_score === 'number'
         ? eventPayload.ml_score
         : null,
-    decision_source: typeof raw.decision_source === 'string' ? raw.decision_source : 'rule',
-    matched_rule_ids: Array.isArray(raw.matched_rule_ids)
-      ? raw.matched_rule_ids.filter((ruleId): ruleId is string => typeof ruleId === 'string')
-      : [],
+    decision_source: isNetworkEvent
+      ? 'network-firewall'
+      : typeof raw.decision_source === 'string' ? raw.decision_source : 'rule',
+    matched_rule_ids: [
+      ...(Array.isArray(raw.matched_rule_ids)
+        ? raw.matched_rule_ids.filter((ruleId): ruleId is string => typeof ruleId === 'string')
+        : []),
+      ...(typeof raw.rule_id === 'string' ? [raw.rule_id] : []),
+    ],
     sqli_findings: Array.isArray(raw.sqli_findings)
       ? raw.sqli_findings.filter((finding): finding is Record<string, unknown> => !!finding && typeof finding === 'object')
       : [],
@@ -117,7 +140,14 @@ const normalizeTrafficEvent = (value: unknown): TrafficEvent | null => {
     scenario: typeof raw.scenario === 'string'
       ? raw.scenario
       : typeof eventPayload.scenario === 'string' ? eventPayload.scenario : undefined,
-    severity: typeof raw.severity === 'string' ? raw.severity : undefined,
+    severity: typeof raw.severity === 'string'
+      ? raw.severity
+      : typeof raw.risk === 'string' ? raw.risk : undefined,
+    network_destination: typeof raw.destination === 'string' ? raw.destination : undefined,
+    destination_ip: typeof raw.destination_ip === 'string' ? raw.destination_ip : undefined,
+    destination_port: typeof raw.port === 'number' ? raw.port : undefined,
+    network_protocol: typeof raw.protocol === 'string' ? raw.protocol : undefined,
+    network_outcome: typeof raw.outcome === 'string' ? raw.outcome : undefined,
     correlation_window_seconds: typeof raw.correlation_window_seconds === 'number' ? raw.correlation_window_seconds : undefined,
     trigger_event_id: typeof raw.trigger_event_id === 'string' ? raw.trigger_event_id : undefined,
     observable_features: raw.observable_features && typeof raw.observable_features === 'object'
@@ -178,11 +208,13 @@ export const useLiveTraffic = (
     if (seenEventIdsRef.current.has(event.event_id)) return;
     seenEventIdsRef.current.add(event.event_id);
     setEvents((prev) => [event, ...prev].slice(0, maxEvents));
-    setLiveStats((prev) => ({
-      total_requests: event.total_requests ?? prev.total_requests + (event.decision_source === 'cep' ? 0 : 1),
-      total_blocked: event.total_blocked ?? prev.total_blocked + (event.decision === 'block' ? 1 : 0),
-      total_anomalies: event.total_anomalies ?? prev.total_anomalies + (event.ml_anomaly || event.decision_source === 'cep' ? 1 : 0),
-    }));
+    if (event.event_type !== 'network_firewall_event') {
+      setLiveStats((prev) => ({
+        total_requests: event.total_requests ?? prev.total_requests + (event.decision_source === 'cep' ? 0 : 1),
+        total_blocked: event.total_blocked ?? prev.total_blocked + (event.decision === 'block' ? 1 : 0),
+        total_anomalies: event.total_anomalies ?? prev.total_anomalies + (event.ml_anomaly || event.decision_source === 'cep' ? 1 : 0),
+      }));
+    }
     onEventRef.current?.(event);
   }, [maxEvents]);
 
@@ -224,7 +256,7 @@ export const useLiveTraffic = (
           ws.send('ping');
           // Subscription filters stay on the authenticated gateway connection and
           // are never propagated to the Redis broker.
-          ws.send(JSON.stringify({ type: 'subscribe', filters: { event_types: ['mcp_event', 'security_correlation'] } }));
+          ws.send(JSON.stringify({ type: 'subscribe', filters: { event_types: ['mcp_event', 'security_correlation', 'network_firewall_event'] } }));
         } catch {}
       };
 
@@ -241,8 +273,8 @@ export const useLiveTraffic = (
               total_blocked: message.data.total_blocked || 0,
               total_anomalies: message.data.total_anomalies || 0,
             });
-          } else if (message.type === 'mcp_event' || message.type === 'new_request' || message.type === 'security_correlation') {
-            const newEvent = normalizeTrafficEvent(message.data);
+          } else if (message.type === 'mcp_event' || message.type === 'new_request' || message.type === 'security_correlation' || message.type === 'network_firewall_event') {
+            const newEvent = normalizeTrafficEvent(message.data, message.type);
             if (!newEvent) {
               console.error('[Sentinel WS] Invalid traffic event payload:', message.data);
               return;
@@ -301,22 +333,38 @@ export const useLiveTraffic = (
     isMountedRef.current = true;
     const token = localStorage.getItem('access_token');
     if (token) {
-      fetch(`${API_URL}/mcp/events?limit=${maxEvents}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-        .then(async (response) => {
-          if (!response.ok) {
-            throw new Error(`Unable to load recent MCP events (${response.status})`);
+      Promise.all([
+        fetch(`${API_URL}/mcp/events?limit=${maxEvents}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch(`${API_URL}/network-firewall/events?limit=${maxEvents}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ])
+        .then(async ([mcpResponse, firewallResponse]) => {
+          if (!mcpResponse.ok) {
+            throw new Error(`Unable to load recent MCP events (${mcpResponse.status})`);
           }
-          const data = await response.json();
-          const history = Array.isArray(data.events)
-            ? data.events.map(normalizeTrafficEvent).filter((event: TrafficEvent | null): event is TrafficEvent => event !== null)
+          if (!firewallResponse.ok) {
+            throw new Error(`Unable to load recent network firewall events (${firewallResponse.status})`);
+          }
+          const [data, firewallData] = await Promise.all([mcpResponse.json(), firewallResponse.json()]);
+          const mcpHistory = Array.isArray(data.events)
+            ? data.events.map((event: unknown) => normalizeTrafficEvent(event, 'mcp_event'))
+              .filter((event: TrafficEvent | null): event is TrafficEvent => event !== null)
             : [];
+          const firewallHistory = Array.isArray(firewallData)
+            ? firewallData.map((event: unknown) => normalizeTrafficEvent(event, 'network_firewall_event'))
+              .filter((event: TrafficEvent | null): event is TrafficEvent => event !== null)
+            : [];
+          const history = [...mcpHistory, ...firewallHistory]
+            .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
           if (!isMountedRef.current) return;
           history.forEach((event: TrafficEvent) => seenEventIdsRef.current.add(event.event_id));
           setEvents((current) => {
             const existing = new Set(current.map((event) => event.event_id));
             return [...current, ...history.filter((event: TrafficEvent) => !existing.has(event.event_id))]
+              .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
               .slice(0, maxEvents);
           });
         })

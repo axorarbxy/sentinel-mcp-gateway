@@ -38,7 +38,9 @@ flowchart LR
     G[🟪 Authenticate agent] --> V[🟦 Validate MCP message]
     V --> P{🟥 Policy decision}
     P -->|block| D[⛔ Return JSON-RPC error]
-    P -->|allow / flag| U[🟩 Forward to configured upstream]
+    P -->|allow / flag| N[🧱 Network destination policy]
+    N -->|block / review| D
+    N -->|allow · pinned IP| U[🟩 Forward to configured upstream]
     U --> R[🟨 Inspect response · filter tools]
     R --> E[🟧 Redact and persist event]
   end
@@ -56,6 +58,7 @@ flowchart LR
   class A,DB,UI blue;
   class G,X purple;
   class P,D red;
+  class N purple;
   class U green;
   class V,R yellow;
   class E,Q orange;
@@ -67,7 +70,9 @@ flowchart LR
 flowchart LR
   REQ[📨 MCP request] --> POLICY{🔴 Deterministic policy}
   POLICY -->|deny| STOP[⛔ Block before upstream]
-  POLICY -->|allow / flag| UP[🟢 Forward to MCP upstream]
+  POLICY -->|allow / flag| NET[🧱 Network destination policy]
+  NET -->|block / review| STOP
+  NET -->|allow · pinned IP| UP[🟢 Forward to MCP upstream]
   REQ -. observation .-> BASE[🟠 Per-agent behavior baseline]
   BASE --> SIGNAL[Anomaly signal]
   UP --> EVENT[🟣 Redacted versioned event]
@@ -84,6 +89,7 @@ flowchart LR
   classDef blue fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px;
   classDef yellow fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px;
   class POLICY,STOP red;
+  class NET purple;
   class BASE,SIGNAL orange;
   class EVENT,CORR purple;
   class UP green;
@@ -93,6 +99,7 @@ flowchart LR
 ## ✨ Capabilities
 
 - **🧱 Policy enforcement:** per-agent allowed tools, strict handling of unknown methods, and an asynchronous decision hook that fails closed on error or timeout.
+- **🌐 Network firewall:** deterministic upstream destination policy, DNS/address validation, SSRF protections, pinned outbound connections, and auditable admin rules.
 - **🧷 Sensitive-action safeguards:** optional per-session untrusted-data taint tracking for configured sensitive tools; policy matches exact upstream tool names.
 - **🔑 Credential lifecycle:** one-time agent keys, rotation and revocation, suspension, and distinct operator authentication.
 - **🧠 Behavioral monitoring:** per-agent Isolation Forest baselines, bounded argument-shape signals, and anomaly alerts.
@@ -110,6 +117,7 @@ The dashboard provides a command center, threat alerts, agent and MCP gateway vi
 | Area | What it provides |
 |:--|:--|
 | Sentinel MCP gateway | Agent authentication, upstream proxying, runtime policy checks, session boundaries, and audit events |
+| Network firewall | Outbound destination rules, SSRF/DNS checks, connection pinning, and firewall decision events |
 | CyberEye modules | URL/file/network/user/Android/password/QR analysis, plus payload and network-flow scoring |
 | Event operations | SQLite-backed history and outbox; optional Redis Streams, MQTT, and Kafka transports |
 | Browser extension | Chrome/Chromium Manifest V3 protection, source in `security/extension/` |
@@ -224,6 +232,7 @@ sequenceDiagram
 - [MCP request interception](#mcp-request-interception)
   - [Supported transport](#supported-transport)
   - [Configure an upstream](#configure-an-upstream)
+  - [Network firewall](#network-firewall)
   - [Route Codex MCP traffic through Sentinel](#route-codex-mcp-traffic-through-sentinel)
   - [Decision hook and event schema](#decision-hook-and-event-schema)
   - [Adaptive per-agent behavior baseline](#adaptive-per-agent-behavior-baseline)
@@ -495,6 +504,38 @@ Each agent's configured URL overrides the environment default. An empty
 effective upstream URL fails closed with HTTP 503. Upstream errors and
 invalid responses become JSON-RPC gateway errors instead of exposing upstream
 details. No automatic retries are made.
+
+### Network firewall
+
+The optional application-layer network firewall evaluates every MCP upstream
+destination before the proxy connects. When enabled, it resolves and validates
+all A/AAAA addresses, blocks prohibited address ranges before policy matching,
+applies administrator-managed allow/deny/review rules, and pins the outbound
+TCP connection to a validated address while preserving the original hostname
+for TLS verification. Redirects are not followed automatically. Firewall
+decisions and rule changes are persisted and decision events use the existing
+outbox pipeline.
+
+For development, it is disabled by default to preserve local/test upstream
+workflows. In production, startup requires it to be enabled and configured to
+default-deny. Enable it by setting `SENTINEL_NETWORK_FIREWALL_ENABLED=true`,
+then use the operator-protected `/network-firewall/rules` API with a
+`gateway:admin` token to add explicit destination rules. The default destination
+constraints allow only HTTPS on port 443; configure the approved domain rules
+using `SENTINEL_NETWORK_ALLOWED_DOMAINS` or administrator rules. Private,
+loopback, link-local, reserved, unspecified, and multicast addresses are
+blocked before allow rules can match. To reach a deliberately approved private
+upstream, set `SENTINEL_NETWORK_BLOCK_PRIVATE=false` and add a narrow explicit
+domain/IP rule; this does not change the default-deny action. Keep deployment
+network controls in place.
+
+`POST /network-firewall/test` is a non-invasive simulation; it never resolves a
+hostname or connects to a destination, so hostname results may be `REVIEW`
+because address safety cannot be established offline. The firewall is not an
+OS packet filter and cannot control traffic that bypasses Sentinel. Continue to
+use host firewalls, cloud security groups/network policies, restricted DNS,
+egress proxies, and reverse-proxy controls in production. Review [Gateway
+operations](./monitoring/GATEWAY_OPERATIONS.md) for deployment guidance.
 
 ### Route Codex MCP traffic through Sentinel
 

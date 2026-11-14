@@ -172,7 +172,8 @@ const Dashboard: React.FC = () => {
     const cutoff = liveClock - 60_000;
     const recent = events.filter((event) => {
       const timestamp = new Date(event.timestamp).getTime();
-      return Number.isFinite(timestamp) && timestamp >= cutoff && timestamp <= liveClock;
+      return event.event_type !== 'network_firewall_event'
+        && Number.isFinite(timestamp) && timestamp >= cutoff && timestamp <= liveClock;
     });
     const buckets = Array.from({ length: 6 }, (_, index) => {
       const start = liveClock - 60_000 + index * 10_000;
@@ -203,14 +204,15 @@ const Dashboard: React.FC = () => {
       const timestamp = new Date(event.timestamp).getTime();
       return Number.isFinite(timestamp) && timestamp >= cutoff && timestamp <= liveClock;
     });
-    const correlations = recent.filter((event) => event.decision_source === 'cep' || event.method === 'security/correlation');
+    const mcpRecent = recent.filter((event) => event.event_type !== 'network_firewall_event');
+    const correlations = mcpRecent.filter((event) => event.decision_source === 'cep' || event.method === 'security/correlation');
     return {
-      policyBlocks: recent.filter((event) => event.decision === 'block' && event.decision_source !== 'cep').length,
-      mlAnomalies: recent.filter((event) => event.ml_anomaly).length,
+      policyBlocks: mcpRecent.filter((event) => event.decision === 'block' && event.decision_source !== 'cep').length,
+      mlAnomalies: mcpRecent.filter((event) => event.ml_anomaly).length,
       cepCorrelations: correlations.length,
       correlations: correlations.slice(0, 4),
-      featureEvents: recent.filter((event) => event.observable_features),
-      ruleHits: recent.reduce((total, event) => total + event.matched_rule_ids.length, 0),
+      featureEvents: mcpRecent.filter((event) => event.observable_features),
+      ruleHits: mcpRecent.reduce((total, event) => total + event.matched_rule_ids.length, 0),
     };
   }, [events, liveClock]);
 
@@ -564,22 +566,32 @@ const Dashboard: React.FC = () => {
     <Paper sx={{ p: 3 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
         <Box>
-          <Typography variant="h6">Recent MCP agent events</Typography>
-          <Typography variant="caption" color="text.secondary">Persisted history with live updates for requests passing through the gateway.</Typography>
+          <Typography variant="h6">Recent gateway security events</Typography>
+          <Typography variant="caption" color="text.secondary">Persisted MCP and outbound network firewall events with live updates.</Typography>
         </Box>
         <Chip size="small" label={connected ? 'LIVE' : 'OFFLINE'} color={connected ? 'success' : 'default'} />
       </Box>
       <Divider />
       {events.length ? events.slice(0, 25).map((event: TrafficEvent) => (
         <Box key={event.event_id} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1.25, borderBottom: '1px solid', borderColor: 'divider', flexWrap: 'wrap' }}>
-          {event.decision === 'block' ? <BlockIcon color="error" /> : <CheckCircleIcon color="success" />}
+          {event.decision === 'block'
+            ? <BlockIcon color="error" />
+            : event.decision === 'flag'
+              ? <WarningIcon color="warning" />
+              : <CheckCircleIcon color="success" />}
           <Box sx={{ flex: 1, minWidth: 180 }}>
             <Typography sx={{ fontWeight: 600 }}>
               {event.agent_name}
-              <Typography component="span" variant="caption" color="text.secondary"> · {event.tool_name || event.method}</Typography>
+            <Typography component="span" variant="caption" color="text.secondary"> · {event.network_destination || event.tool_name || event.method}</Typography>
               {event.synthetic_demo && <Chip size="small" color="secondary" label="DEMO" sx={{ ml: 1, height: 20 }} />}
             </Typography>
             <Typography variant="caption" color="text.secondary">{event.decision_reason || 'No policy reason reported'}</Typography>
+          {event.event_type === 'network_firewall_event' && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              {event.destination_ip || 'Unresolved'}:{event.destination_port ?? '—'} · {event.network_protocol || 'network'}
+              {event.network_outcome ? ` · ${event.network_outcome}` : ''}
+            </Typography>
+          )}
             {event.ml_anomaly && <Typography variant="caption" color="warning.main" sx={{ display: 'block' }}>
               Behavioral deviation: {event.behavioral_explanation?.length
                 ? event.behavioral_explanation.map((item) => `${item.feature} (${item.observed_z_score > 0 ? '+' : ''}${item.observed_z_score}σ)`).join(' · ')
@@ -606,7 +618,7 @@ const Dashboard: React.FC = () => {
             <Typography variant="caption" color="text.secondary">{new Date(log.timestamp).toLocaleTimeString()}</Typography>
           </Box>
         );
-      }) : <Box sx={{ py: 5, textAlign: 'center' }}><Typography color="text.secondary">No MCP agent traffic yet. Send requests through /mcp/proxy to populate this dashboard.</Typography></Box>}
+      }) : <Box sx={{ py: 5, textAlign: 'center' }}><Typography color="text.secondary">No gateway events yet. Send requests through /mcp/proxy or run an upstream health check to populate this dashboard.</Typography></Box>}
     </Paper>
   </Box>;
 };

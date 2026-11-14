@@ -159,6 +159,30 @@ def ensure_mcp_request_event_schema() -> None:
         raise RuntimeError("Failed to migrate SQLi event fields safely") from exc
 
 
+def ensure_network_firewall_schema() -> None:
+    """Upgrade fields on firewall tables created by earlier development versions."""
+    try:
+        from sqlalchemy import text
+
+        with _current_engine().begin() as conn:
+            if not conn.dialect.has_table(conn, "network_firewall_events"):
+                return
+            existing_cols = {
+                column["name"] for column in inspect(conn).get_columns("network_firewall_events")
+            }
+            additions = {
+                "outcome": "VARCHAR(32)",
+                "duration_ms": "FLOAT",
+            }
+            for name, column_type in additions.items():
+                if name not in existing_cols:
+                    conn.execute(text(
+                        f"ALTER TABLE network_firewall_events ADD COLUMN {name} {column_type}"
+                    ))
+    except Exception as exc:
+        raise RuntimeError("Failed to migrate network firewall event fields safely") from exc
+
+
 # ============ EXISTING TABLES ============
 class User(Base):
     __tablename__ = "users"
@@ -247,6 +271,58 @@ class MCPEventOutbox(Base):
     dead_lettered_at = Column(DateTime, nullable=True)
     last_error = Column(String(200), nullable=True)
     created_at = Column(DateTime, nullable=False, default=utcnow)
+
+
+class NetworkFirewallRule(Base):
+    """Administrator-managed network destination rules."""
+    __tablename__ = "network_firewall_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    rule_id = Column(String(40), nullable=False, unique=True, index=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+    version = Column(Integer, nullable=False, default=1)
+    action = Column(String(16), nullable=False)
+    destination = Column(String(253), nullable=False, index=True)
+    priority = Column(Integer, nullable=False, default=100, index=True)
+    agent_id = Column(Integer, nullable=True, index=True)
+    port = Column(Integer, nullable=True)
+    protocol = Column(String(8), nullable=True)
+    description = Column(String(500), nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=utcnow)
+    updated_at = Column(DateTime, nullable=False, default=utcnow, index=True)
+
+
+class NetworkFirewallRuleHistory(Base):
+    """Immutable snapshots for administrator firewall policy changes."""
+    __tablename__ = "network_firewall_rule_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    rule_id = Column(String(40), nullable=False, index=True)
+    version = Column(Integer, nullable=False)
+    action = Column(String(16), nullable=False)
+    actor_id = Column(String(100), nullable=True)
+    snapshot_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=utcnow, index=True)
+
+
+class NetworkFirewallEvent(Base):
+    """Redacted, durable application-layer network firewall decisions."""
+    __tablename__ = "network_firewall_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(String(40), nullable=False, unique=True, index=True)
+    agent_id = Column(String(64), nullable=True, index=True)
+    destination = Column(String(253), nullable=False, index=True)
+    destination_ip = Column(String(45), nullable=True)
+    port = Column(Integer, nullable=True)
+    protocol = Column(String(8), nullable=True)
+    decision = Column(String(16), nullable=False, index=True)
+    rule_id = Column(String(40), nullable=True, index=True)
+    reason = Column(String(500), nullable=False)
+    risk = Column(String(16), nullable=False, index=True)
+    outcome = Column(String(32), nullable=True)
+    duration_ms = Column(Float, nullable=True)
+    timestamp = Column(DateTime, nullable=False, default=utcnow, index=True)
 
 
 class SQLiPolicyConfig(Base):
@@ -402,6 +478,7 @@ class MCPPolicy(Base):
 Base.metadata.create_all(bind=engine)
 ensure_mcp_agent_schema()
 ensure_mcp_request_event_schema()
+ensure_network_firewall_schema()
 
 
 def get_db():
