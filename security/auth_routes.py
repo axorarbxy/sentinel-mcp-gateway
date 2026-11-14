@@ -9,15 +9,24 @@ from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
 from typing import Optional
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from time_utils import utcnow
+if __package__:
+    from monitoring.time_utils import utcnow
+else:
+    from monitoring.time_utils import utcnow
 import re
 import secrets
 
 from database import get_db, User, AuditLog, APIKey
-from auth import (
-    verify_password, get_password_hash, create_access_token,
-    create_refresh_token, decode_token, is_demo_environment,
-)
+if __package__:
+    from .auth import (
+        verify_password, get_password_hash, create_access_token,
+        create_refresh_token, decode_token, is_demo_environment,
+    )
+else:
+    from auth import (
+        verify_password, get_password_hash, create_access_token,
+        create_refresh_token, decode_token, is_demo_environment,
+    )
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 

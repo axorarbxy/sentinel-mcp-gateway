@@ -7,9 +7,15 @@ from fastapi import APIRouter, Depends, HTTPException, Security
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from auth_routes import require_scopes
+if __package__:
+    from .auth_routes import require_scopes
+else:
+    from auth_routes import require_scopes
 from database import AuditLog, SQLiPolicyConfig, get_db
-from sqli_policy import analyze_sql_injection, get_runtime_configuration, list_sqli_indicators
+if __package__:
+    from .sqli_policy import analyze_sql_injection, get_runtime_configuration, list_sqli_indicators
+else:
+    from sqli_policy import analyze_sql_injection, get_runtime_configuration, list_sqli_indicators
 
 
 router = APIRouter(prefix="/api/policies/sqli", tags=["SQL injection policy"])

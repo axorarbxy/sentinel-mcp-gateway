@@ -17,12 +17,20 @@ from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit
 
 import httpx
-from shared_state import (
-    MCP_SESSION_TTL_SECONDS,
-    REQUEST_CLAIM_TTL_SECONDS,
-    SharedStateUnavailable,
-    get_shared_state,
-)
+if __package__:
+    from .shared_state import (
+        MCP_SESSION_TTL_SECONDS,
+        REQUEST_CLAIM_TTL_SECONDS,
+        SharedStateUnavailable,
+        get_shared_state,
+    )
+else:
+    from shared_state import (
+        MCP_SESSION_TTL_SECONDS,
+        REQUEST_CLAIM_TTL_SECONDS,
+        SharedStateUnavailable,
+        get_shared_state,
+    )
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
@@ -1630,4 +1638,3 @@ async def intercept_request(
         request, messages, allowed, blocked, agent, session_id, emit_event,
         is_batch=isinstance(payload, list),
     )
-
